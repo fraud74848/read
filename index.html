@@ -2061,16 +2061,7 @@
                     highlightLiElement(liElement, true);
 
                     // 重力下落效果
-                    liElement.animate(
-                        [
-                            { transform: "translateY(0)", easing: "ease-out" },
-                            { transform: "translateY(30px)", easing: "ease-in" },
-                            { transform: "translateY(0)", easing: "ease-out" },
-                        ],
-                        {
-                            duration: 600,
-                        }
-                    );
+                    playGravityDrop(liElement);
                 }
 
                 // 9. 优化事件绑定和防抖
@@ -2129,16 +2120,35 @@
                 highlightedLi = liElement;
 
                 // 添加重力下落效果
-                liElement.animate(
+                playGravityDrop(liElement);
+            }
+
+            /**
+             * 菜单按钮"重力下落"动画。
+             * 【修复】所有 li 都是 position:relative + z-index:999（层级相同），
+             * DOM 中靠后的按钮会盖住下落中的按钮。动画期间临时把它提到最上层，结束后还原。
+             */
+            function playGravityDrop(liElement) {
+                if (!liElement) return;
+                if (liElement._dropAnim) liElement._dropAnim.cancel();
+                liElement.style.zIndex = "1000";
+                const anim = liElement.animate(
                     [
                         { transform: "translateY(0)", easing: "ease-out" },
                         { transform: "translateY(30px)", easing: "ease-in" },
                         { transform: "translateY(0)", easing: "ease-out" },
                     ],
-                    {
-                        duration: 600,
-                    }
+                    { duration: 600 }
                 );
+                liElement._dropAnim = anim;
+                const restore = function () {
+                    if (liElement._dropAnim === anim) {
+                        liElement.style.zIndex = "";
+                        liElement._dropAnim = null;
+                    }
+                };
+                anim.onfinish = restore;
+                anim.oncancel = restore;
             }
 
             // ======================
@@ -7321,6 +7331,63 @@
             pointer-events: none;
         }
     </style>
+<style id="subHeadStyles">
+/* ===== 小标题美化：h4 / h5 每连续 3 个换一种样式（共 4 种循环，由底部脚本写入 data-sub） ===== */
+#output>h4[data-sub],#output>h5[data-sub]{position:relative;font-weight:600;letter-spacing:.5px;transition:transform .2s ease,box-shadow .2s ease}
+#output>h4[data-sub]{padding:4px 14px;font-size:14px}
+#output>h5[data-sub]{padding:2px 12px;font-size:13px}
+#output>h4[data-sub]:hover,#output>h5[data-sub]:hover{transform:translateY(-1px)}
+
+/* h4-A 霓虹青胶囊：呼吸光晕 + 前置光点脉冲 */
+#output>h4[data-sub="0"]{color:#9ffcff;padding:4px 16px 4px 12px;border:1px solid #22e3ff;border-radius:999px;
+ text-shadow:0 0 6px #22e3ff;background:linear-gradient(90deg,rgba(5,25,50,.82),rgba(8,48,86,.72));
+ box-shadow:inset 0 0 8px rgba(34,227,255,.25)}
+#output>h4[data-sub="0"]::before{content:"";display:inline-block;width:7px;height:7px;margin-right:8px;vertical-align:1px;
+ border-radius:50%;background:#22e3ff;box-shadow:0 0 6px #22e3ff;animation:subDot 1.6s ease-in-out infinite}
+#output>h4[data-sub="0"]::after{content:"";position:absolute;inset:-1px;border-radius:inherit;pointer-events:none;opacity:.3;
+ box-shadow:0 0 8px 1px rgba(34,227,255,.9),0 0 16px 2px rgba(34,227,255,.45);animation:subGlow 2.4s ease-in-out infinite}
+@keyframes subGlow{0%,100%{opacity:.3}50%{opacity:1}}
+@keyframes subDot{0%,100%{opacity:.45;transform:scale(.8)}50%{opacity:1;transform:scale(1.15)}}
+/* h4-B 流光边框 */
+#output>h4[data-sub="1"]{color:#fff;border:2px solid transparent;border-radius:20px;text-shadow:0 1px 3px rgba(0,0,0,.6);
+ background:linear-gradient(#1b1030,#1b1030) padding-box,linear-gradient(90deg,#ff00cc,#3333ff,#00ffcc,#ff00cc) border-box;
+ background-size:100% 100%,200% 100%;animation:subFlow 4s linear infinite}
+@keyframes subFlow{to{background-position:0 0,200% 0}}
+/* h4-C 斜切金橙 */
+#output>h4[data-sub="2"]{color:#2a1200;padding-right:24px;border:0;border-left:5px solid #fff;border-radius:4px 0 0 4px;text-shadow:none;
+ background:linear-gradient(90deg,#ffc300,#ff6a00);clip-path:polygon(0 0,calc(100% - 12px) 0,100% 100%,0 100%);overflow:hidden}
+#output>h4[data-sub="2"]::after{content:"";position:absolute;inset:0;pointer-events:none;transform:translateX(-120%);
+ background:linear-gradient(105deg,transparent 30%,rgba(255,255,255,.65) 50%,transparent 70%);animation:subShine 3.5s ease-in-out infinite}
+/* h4-D 玻璃扫光 */
+/* 底层一层淡深色保证白字在亮背景上也清晰；上层紫→青→粉渐变半透明，深/浅/彩色背景都能透出并协调 */
+#output>h4[data-sub="3"]{color:#fff;overflow:hidden;border:1px solid rgba(255,255,255,.6);border-radius:10px;
+ text-shadow:0 1px 3px rgba(0,0,0,.65);
+ background:linear-gradient(135deg,rgba(124,92,255,.62) 0%,rgba(0,190,255,.45) 50%,rgba(255,110,210,.58) 100%),
+            linear-gradient(rgba(12,16,40,.3),rgba(12,16,40,.3));
+ box-shadow:0 4px 14px rgba(0,0,0,.28),inset 0 1px 0 rgba(255,255,255,.45);
+ -webkit-backdrop-filter:blur(8px) saturate(1.4);backdrop-filter:blur(8px) saturate(1.4)}
+#output>h4[data-sub="3"]::after{content:"";position:absolute;inset:0;pointer-events:none;transform:translateX(-120%);
+ background:linear-gradient(105deg,transparent 30%,rgba(255,255,255,.5) 50%,transparent 70%);animation:subShine 4s ease-in-out infinite}
+@keyframes subShine{0%,40%{transform:translateX(-120%)}100%{transform:translateX(120%)}}
+
+/* h5-A 薄荷胶囊 */
+#output>h5[data-sub="0"]{color:#033;border:0;border-radius:999px;background:linear-gradient(90deg,#00c9a7,#92fe9d);box-shadow:0 2px 6px rgba(0,201,167,.4)}
+#output>h5[data-sub="0"]::before{content:"●";margin-right:6px;font-size:9px;vertical-align:1px;color:#fff}
+/* h5-B 橙红丝带 */
+#output>h5[data-sub="1"]{color:#fff;border:0;border-radius:4px 14px 4px 14px;text-shadow:0 1px 2px rgba(0,0,0,.4);
+ background:linear-gradient(90deg,#ff512f,#f09819);box-shadow:0 2px 6px rgba(255,81,47,.4)}
+/* h5-C 蓝色科技虚线 */
+#output>h5[data-sub="2"]{color:#aad6ff;background:rgba(10,30,80,.6);border:1px dashed #5aa9ff;border-radius:6px;box-shadow:0 0 6px rgba(90,169,255,.5)}
+#output>h5[data-sub="2"]::before{content:"‹ ";opacity:.8}
+#output>h5[data-sub="2"]::after{content:" ›";opacity:.8}
+/* h5-D 紫粉渐变 */
+#output>h5[data-sub="3"]{color:#fff;border:0;border-radius:999px;text-shadow:0 1px 2px rgba(0,0,0,.35);
+ background:linear-gradient(135deg,#8e2de2,#f857a6);box-shadow:0 2px 8px rgba(142,45,226,.45)}
+#output>h5[data-sub="3"]::before{content:"✦ "}
+
+/* 沉浸模式隐藏时暂停动画，省性能 */
+body.immersiveHidden #output>h4[data-sub],body.immersiveHidden #output>h4[data-sub]::before,body.immersiveHidden #output>h4[data-sub]::after{animation-play-state:paused}
+</style>
 </head>
 
 
@@ -7717,6 +7784,28 @@
             });
         })();
     </script>
+<script>
+/* 小标题样式轮换：#output 里的 h4、h5 各自按出现顺序，每连续 3 个换一种样式（共 4 种循环）。
+   导入 / 新增 / 插入 / 删除后内容变化会自动重新编号。 */
+(function () {
+    var out = document.getElementById("output");
+    if (!out) return;
+    var STYLES = 4, GROUP = 3, raf = 0;
+    function apply() {
+        raf = 0;
+        var c4 = 0, c5 = 0;
+        Array.prototype.forEach.call(out.children, function (el) {
+            var v = null;
+            if (el.tagName === "H4") v = Math.floor(c4++ / GROUP) % STYLES;
+            else if (el.tagName === "H5") v = Math.floor(c5++ / GROUP) % STYLES;
+            if (v !== null && el.getAttribute("data-sub") !== String(v)) el.setAttribute("data-sub", v);
+        });
+    }
+    new MutationObserver(function () { if (!raf) raf = requestAnimationFrame(apply); })
+        .observe(out, { childList: true });
+    apply();
+})();
+</script>
 </body>
 
 </html>
