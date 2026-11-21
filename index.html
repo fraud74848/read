@@ -2862,13 +2862,15 @@
                 });
 
                 function showToast(msg) {
+                    // 连续触发时先移除上一条，避免两条提示叠在同一位置
+                    $(".simpleToast").remove();
                     const t = $("<div>").addClass("simpleToast").text(msg);
                     $("body").append(t);
                     setTimeout(() => t.addClass("show"), 10);
                     setTimeout(() => {
-                        t.removeClass("show");
-                        setTimeout(() => t.remove(), 300);
-                    }, 2200);
+                        t.removeClass("show").addClass("hide");
+                        setTimeout(() => t.remove(), 350);
+                    }, 2400);
                 }
                 // 【新增】桥接给外层作用域的 processJsonFile / processCsvFile 使用，用于导入结果提示
                 showToastGlobal = showToast;
@@ -5895,26 +5897,65 @@
             }
         }
 
+        /* 【修改】通用提示：沿用"复制成功"的流动渐变胶囊 + 发光 + 弹入弹出（去掉粒子，字号略小，适合各种提示） */
         .simpleToast {
             position: fixed;
             top: 58px;
             left: 50%;
-            transform: translateX(-50%) translateY(-10px);
-            background: rgba(20, 20, 20, 0.9);
+            transform: translateX(-50%);
+            max-width: min(86vw, 520px);
+            text-align: center;
+            line-height: 1.5;
+            background: linear-gradient(135deg, #ff00cc, #3333ff, #00ffcc, #ffcc00);
+            background-size: 300% 300%;
             color: #fff;
-            padding: 10px 18px;
-            border-radius: 20px;
-            font-size: 14px;
+            padding: 10px 24px;
+            border-radius: 50px;
+            font-size: 15px;
+            font-weight: 700;
             z-index: 100010;
             opacity: 0;
-            transition: opacity 0.25s ease, transform 0.25s ease;
             pointer-events: none;
-            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+            box-shadow: 0 0 14px rgba(255, 255, 255, 0.45),
+                0 0 28px rgba(255, 0, 255, 0.4), 0 0 40px rgba(0, 255, 255, 0.25);
+            text-shadow: 0 0 8px rgba(255, 255, 255, 0.8);
         }
 
         .simpleToast.show {
-            opacity: 1;
-            transform: translateX(-50%) translateY(0);
+            animation: toastIn 0.5s forwards, gradientBG 3s ease infinite;
+        }
+
+        .simpleToast.hide {
+            animation: toastOut 0.35s forwards, gradientBG 3s ease infinite;
+        }
+
+        @keyframes toastIn {
+            0% {
+                opacity: 0;
+                transform: translateX(-50%) translateY(-24px) scale(0.85);
+            }
+
+            70% {
+                opacity: 1;
+                transform: translateX(-50%) translateY(4px) scale(1.05);
+            }
+
+            100% {
+                opacity: 1;
+                transform: translateX(-50%) translateY(0) scale(1);
+            }
+        }
+
+        @keyframes toastOut {
+            0% {
+                opacity: 1;
+                transform: translateX(-50%) translateY(0) scale(1);
+            }
+
+            100% {
+                opacity: 0;
+                transform: translateX(-50%) translateY(-24px) scale(0.9);
+            }
         }
 
         /* 【新增】右键菜单：标题/小标题/内容/图片 通用操作菜单 */
