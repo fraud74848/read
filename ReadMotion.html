@@ -425,7 +425,7 @@
         }
 
         function loadUiSettings() {
-            const defaults = { opacity: 100, hideTime: 0, menuColors: [], fx: { bottom: false, shine: false, breath: true, copy: false, flow: false } };
+            const defaults = { opacity: 100, hideTime: 0, menuColors: [], fx: { bottom: false, shine: false, breath: true, copy: false, flow: false, uiblur: true, video: true, loopContent: true, loopBatch: true } };
             try {
                 const raw = localStorage.getItem(UI_SETTINGS_KEY);
                 return raw ? Object.assign(defaults, JSON.parse(raw)) : defaults;
@@ -4066,13 +4066,18 @@
                     opacitySlider.on("input", function () { applyOpacityValue(Number(this.value)); });
 
                     // ---------- 特效开关 ----------
-                    const fxMap = { bottom: "#fxBottom", shine: "#fxShine", breath: "#fxBreath", copy: "#fxCopy", flow: "#fxFlow" };
-                    let savedFx = Object.assign({ bottom: false, shine: false, breath: true, copy: false, flow: false }, savedSettings.fx || {});
+                    const fxMap = { bottom: "#fxBottom", shine: "#fxShine", breath: "#fxBreath", copy: "#fxCopy", flow: "#fxFlow", uiblur: "#fxUiBlur", video: "#fxVideo", loopContent: "#fxLoopContent", loopBatch: "#fxLoopBatch" };
+                    let savedFx = Object.assign({ bottom: false, shine: false, breath: true, copy: false, flow: false, uiblur: true, video: true, loopContent: true, loopBatch: true }, savedSettings.fx || {});
                     function applyFx(fx) {
                         const root = document.documentElement.classList;
                         root.toggle("fx-no-bottom", !fx.bottom);
                         root.toggle("fx-no-shine", !fx.shine);
                         root.toggle("fx-no-breath", !fx.breath);
+                        root.toggle("fx-no-uiblur", !fx.uiblur);
+                        root.toggle("fx-no-loopcontent", !fx.loopContent);
+                        root.toggle("fx-no-loopbatch", !fx.loopBatch);
+                        window.FX_VIDEO = !!fx.video;
+                        if (window.syncBgVideo) window.syncBgVideo();
                         window.FX_COPY = !!fx.copy;
                         window.FX_H4FLOW = !!fx.flow;
                         if (window.applySubHeadStyles) window.applySubHeadStyles();
@@ -7750,6 +7755,17 @@ body.batchMode #output>h4.batchSelected{overflow:visible;clip-path:none}
 .abStatus { margin: 8px 0 4px; font-size: 12px; line-height: 1.6; color: #5a7286; word-break: break-all; }
 .fxItem input { width: 16px; height: 16px; flex: none; accent-color: #8b5cf6; }
 </style>
+<style id="panelHeaderFix">
+/* 弹窗内容较长时在面板内滚动，顶部标题栏固定不动（粘在滚动容器顶部） */
+.addPanel .addPanelHeader{position:sticky;top:0;z-index:5}
+.addPanelHeaderBtns{display:flex;align-items:center;gap:8px}
+/* 关闭按钮左边的"保存配置" */
+.addPanelSave{cursor:pointer;border:none;height:24px;padding:0 12px;border-radius:12px;background:rgba(255,255,255,.95);color:#6d4fe0;
+ font-size:12px;font-weight:600;line-height:24px;white-space:nowrap;box-shadow:0 1px 4px rgba(0,0,0,.18);
+ transition:filter .15s ease,transform .15s ease}
+.addPanelSave:hover{filter:brightness(.96);transform:translateY(-1px)}
+.addPanelSave:active{transform:scale(.96)}
+</style>
 <style id="fxToggleStyles">
 /* ===== 设置里可单独关闭的特效（默认全部开启；关闭时由 JS 给 <html> 加对应的 fx-no-* 类） ===== */
 /* 底部时间栏：关闭毛玻璃模糊，改用不透明纯色 */
@@ -7761,6 +7777,34 @@ html.fx-no-bottom .bottom {
 /* 左侧菜单：关闭扫光（选中按钮的呼吸光不受影响） */
 html.fx-no-shine #h3List li:not(.highlight)::after {
     display: none;
+}
+/* 面板 / 弹窗 / 右键菜单 / 批量操作栏：关闭毛玻璃模糊（背景会更透） */
+html.fx-no-uiblur .addPanel,
+html.fx-no-uiblur .confirmOverlay,
+html.fx-no-uiblur .confirmDialog,
+html.fx-no-uiblur .ctxMenu,
+html.fx-no-uiblur .timeDropdown,
+html.fx-no-uiblur .batchModeBar {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+}
+/* 内容区循环光效：暂停（停在初始画面） */
+html.fx-no-loopcontent #output .divHighlight::before,
+html.fx-no-loopcontent #output .highlight::before,
+html.fx-no-loopcontent #output>div.divHighlight:not(.batchSelected)::after,
+html.fx-no-loopcontent #output>div p.highlight:not(.batchSelected)::after,
+html.fx-no-loopcontent #output>h4[data-sub="1"],
+html.fx-no-loopcontent #output>h4[data-sub="2"]::after {
+    animation-play-state: paused !important;
+}
+/* 批量模式循环动效：暂停（批量栏的"滑入"是第一个动画，保持播放，只暂停第二个"边框流动"） */
+html.fx-no-loopbatch .batchModeBar.hasSel .batchModeBtns .batchDeleteBtn,
+html.fx-no-loopbatch .batchInfoIcon,
+html.fx-no-loopbatch body.batchMode::after {
+    animation-play-state: paused !important;
+}
+html.fx-no-loopbatch .batchModeBar.open {
+    animation-play-state: running, paused !important;
 }
 /* 左侧菜单：关闭选中按钮的呼吸灯（外圈光晕 + 内侧边缘光） */
 html.fx-no-breath #h3List li.highlight::before,
@@ -7928,7 +7972,10 @@ html.fx-no-breath #h3List li.highlight::after {
     <div class="addPanel" id="opacityPanel">
         <div class="addPanelHeader">
             <h4>⚙️ 设置</h4>
-            <button class="addPanelClose" id="opacityPanelClose">×</button>
+            <div class="addPanelHeaderBtns">
+                <button class="addPanelSave" id="opacityPanelSave" type="button" title="保存当前设置">保存配置</button>
+                <button class="addPanelClose" id="opacityPanelClose">×</button>
+            </div>
         </div>
         <div class="addTabContent">
             <div class="settingRow">
@@ -7951,13 +7998,17 @@ html.fx-no-breath #h3List li.highlight::after {
                 </div>
             </div>
             <div class="settingRow">
-                <label>✨ 特效开关（勾选 = 开启；默认只开呼吸灯，其余关闭以减少资源占用）</label>
+                <label>✨ 特效开关（勾选 = 开启，取消勾选可降低资源占用；修改后立即预览，点「保存设置」才会保留）</label>
                 <div class="fxList">
                     <label class="fxItem"><input type="checkbox" id="fxBottom" /><span>底部时间栏的毛玻璃模糊</span></label>
                     <label class="fxItem"><input type="checkbox" id="fxShine" /><span>左侧菜单的扫光</span></label>
                     <label class="fxItem"><input type="checkbox" id="fxBreath" checked /><span>左侧菜单选中按钮的呼吸灯</span></label>
                     <label class="fxItem"><input type="checkbox" id="fxFlow" /><span>小标题(h4)使用「流光边框」样式（不勾选时全部用「金橙斜切」）</span></label>
                     <label class="fxItem"><input type="checkbox" id="fxCopy" /><span>点击复制时的动效（色彩波动、粒子、爱心）</span></label>
+                    <label class="fxItem"><input type="checkbox" id="fxUiBlur" checked /><span>面板、弹窗、右键菜单、批量操作栏的毛玻璃模糊</span></label>
+                    <label class="fxItem"><input type="checkbox" id="fxVideo" checked /><span>视频背景播放（取消勾选 = 暂停，只显示静止画面）</span></label>
+                    <label class="fxItem"><input type="checkbox" id="fxLoopContent" checked /><span>内容区的循环光效（小标题流动光、高亮块脉冲）</span></label>
+                    <label class="fxItem"><input type="checkbox" id="fxLoopBatch" checked /><span>批量模式的循环动效（边框流动、图标晃动、删除按钮脉冲、四周光晕）</span></label>
                 </div>
             </div>
             <div class="settingRow">
@@ -8194,13 +8245,21 @@ html.fx-no-breath #h3List li.highlight::after {
         })();
     </script>
 <script>
-/* 页面切到后台时暂停背景视频，回来再继续（图片背景不受影响） */
-document.addEventListener("visibilitychange", function () {
+/* 背景视频播放控制（图片背景不受影响）：
+   页面切到后台时暂停、回来再继续；设置里取消「视频背景播放」时一直暂停，只显示静止画面。 */
+window.syncBgVideo = function () {
     var v = document.getElementById("background-video");
     if (!v || v.tagName !== "VIDEO") return;
-    if (document.hidden) v.pause();
+    if (document.hidden || window.FX_VIDEO === false) { try { v.pause(); } catch (e) { } }
     else { var p = v.play(); if (p && p.catch) p.catch(function () { }); }
-});
+};
+document.addEventListener("visibilitychange", window.syncBgVideo);
+/* 页面代码重新创建或播放背景视频时（切换背景等），在捕获阶段拦截 play 事件，保持暂停 */
+document.addEventListener("play", function (e) {
+    var t = e.target;
+    if (t && t.id === "background-video" && window.FX_VIDEO === false) { try { t.pause(); } catch (_) { } }
+}, true);
+window.syncBgVideo();
 </script>
 <script>
 /* 小标题样式轮换：#output 里的 h4、h5 各自按出现顺序，每连续 3 个换一种样式（共 4 种循环）。
@@ -8368,6 +8427,15 @@ document.addEventListener("visibilitychange", function () {
             sb.classList.remove("hov");
             if (sb._img) sb._img.classList.remove("imgHov");
         }
+        /* 图片的放大标记(imgHov)可能比名称框的悬停标记(hov)活得更久（鼠标快速划过时先被 mouseout 清掉 hov），
+           所以还要按图片本身再清一遍，否则这些图片会一直放大、叠在一起 */
+        var stuck = out.querySelectorAll("img.imgHov");
+        for (var j = 0; j < stuck.length; j++) {
+            var im = stuck[j];
+            if (nb && nb._img === im) continue;
+            im.classList.remove("imgHov");
+            if (im._nb) im._nb.classList.remove("hov");
+        }
         if (nb) {
             if (!nb.classList.contains("hov")) nb.classList.add("hov");
             if (nb._img && !nb._img.classList.contains("imgHov")) nb._img.classList.add("imgHov");
@@ -8395,7 +8463,7 @@ document.addEventListener("visibilitychange", function () {
     out.addEventListener("mouseover", function (e) { if (e.target.tagName === "IMG" && e.target._nb) e.target._nb.classList.add("hov"); });
     out.addEventListener("mouseout", function (e) {
         var nb = e.target.tagName === "IMG" && e.target._nb;
-        if (nb && !nb.contains(e.relatedTarget)) nb.classList.remove("hov");
+        if (nb && !nb.contains(e.relatedTarget)) { nb.classList.remove("hov"); e.target.classList.remove("imgHov"); }
     });
     schedule();
 })();
@@ -8421,6 +8489,13 @@ document.addEventListener("visibilitychange", function () {
             Array.prototype.forEach.call(m.removedNodes, unwatch);
         });
     }).observe(out, { childList: true });
+})();
+</script>
+<script>
+/* 顶部"保存配置"按钮：直接触发底部"保存设置"按钮，复用同一套保存/校验逻辑 */
+(function () {
+    var top = document.getElementById("opacityPanelSave"), bottom = document.getElementById("opacitySaveBtn");
+    if (top && bottom) top.addEventListener("click", function () { bottom.click(); });
 })();
 </script>
 </body>

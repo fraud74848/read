@@ -6,6 +6,7 @@
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>📄读取TXT文件✨</title>
+    
     <link rel="icon" href="https://raw.githubusercontent.com/mubai16888/mb/main/mb.ico" type="image/x-icon" />
     <link rel="icon" href="https://raw.githubusercontent.com/mubai16888/mb/main/mb.png" type="image/png"
         sizes="192x192" />
@@ -424,7 +425,7 @@
         }
 
         function loadUiSettings() {
-            const defaults = { opacity: 100, hideTime: 0, menuColors: [] };
+            const defaults = { opacity: 100, hideTime: 0, menuColors: [], fx: { bottom: false, shine: false, breath: true, copy: false, flow: false, uiblur: true, video: true, loopContent: true, loopBatch: true } };
             try {
                 const raw = localStorage.getItem(UI_SETTINGS_KEY);
                 return raw ? Object.assign(defaults, JSON.parse(raw)) : defaults;
@@ -523,7 +524,7 @@
         function renderManualImageBlock(srcs) {
             const outputDiv = ensureOutputForManual();
             (srcs || []).forEach((src) => {
-                const img = $("<img>")
+                const img = $("<img>").attr({ loading: "lazy", decoding: "async" })
                     .attr("src", src)
                     .addClass("zoomable-image")
                     .css({
@@ -753,7 +754,7 @@
                                         const imgFormats = CONFIG.supportedImageFormats;
 
                                         // 创建图片元素
-                                        element = $("<img>").addClass("zoomable-image").css({
+                                        element = $("<img>").attr({ loading: "lazy", decoding: "async" }).addClass("zoomable-image").css({
                                             width: "150px",
                                             height: "150px",
                                             objectFit: "cover",
@@ -799,7 +800,7 @@
                                 } else if (paragraphText.startsWith("image")) {
                                     const imgSrc = paragraphText.trim();
                                     if (imgSrc) {
-                                        element = $("<img>")
+                                        element = $("<img>").attr({ loading: "lazy", decoding: "async" })
                                             .attr("src", imgSrc)
                                             .addClass("zoomable-image")
                                             .css({
@@ -972,7 +973,7 @@
                             flushParagraph();
                             if (block.src) {
                                 outputDiv.append(
-                                    $("<img>")
+                                    $("<img>").attr({ loading: "lazy", decoding: "async" })
                                         .attr("src", block.src)
                                         .addClass("zoomable-image")
                                         .css({ width: "150px", height: "150px", objectFit: "cover" })
@@ -2276,9 +2277,12 @@
                 }, CONFIG.copyEffect.highlightDuration);
 
                 // 全屏色彩波动效果
-                createColorWaveEffect(event);
-                // 粒子重组动画
-                createQuantumEffect(event);
+                // 复制特效（设置里可关闭）
+                if (window.FX_COPY === true) {
+                    createColorWaveEffect(event);
+                    // 粒子重组动画
+                    createQuantumEffect(event);
+                }
             }
 
             /**
@@ -2370,7 +2374,7 @@
                 notification.addClass("animate-in");
 
                 // 添加粒子爆炸效果
-                createNotificationParticles();
+                if (window.FX_COPY === true) createNotificationParticles();
 
                 // 【关键修复】退场定时器不再依赖 animationend：
                 // 入场动画时长 0.6s + 停留时间，到点一定进入退场，哪怕动画事件没触发也不会卡住
@@ -2629,7 +2633,8 @@
                     const x = e.clientX;
                     const y = e.clientY;
 
-                    for (let i = 0; i < CONFIG.heartAnimation.count; i++) {
+                    // 复制特效关闭时不生成飘动的爱心
+                    for (let i = 0; i < (window.FX_COPY === true ? CONFIG.heartAnimation.count : 0); i++) {
                         const heart = $("<div>").addClass("heart").text("💕 ✨").css({
                             position: "absolute",
                             fontSize: "24px",
@@ -2700,7 +2705,8 @@
             }
 
             // 启动时钟
-            setInterval(updateAllTimes, 1000);
+            setInterval(function () { if (!document.hidden) updateAllTimes(); }, 1000);
+            document.addEventListener("visibilitychange", function () { if (!document.hidden) updateAllTimes(); });
             updateAllTimes();
 
             // ======================
@@ -2734,15 +2740,20 @@
                 }
 
                 // 格式化某个 IANA 时区当前的 HH:MM:SS（自动处理夏令时）
+                const tzFormatters = {};
                 function formatTimeInZone(tz) {
                     try {
-                        return new Date().toLocaleTimeString("zh-CN", {
-                            timeZone: tz,
-                            hour12: false,
-                            hour: "2-digit",
-                            minute: "2-digit",
-                            second: "2-digit",
-                        });
+                        let f = tzFormatters[tz];
+                        if (!f) {
+                            f = tzFormatters[tz] = new Intl.DateTimeFormat("zh-CN", {
+                                timeZone: tz,
+                                hour12: false,
+                                hour: "2-digit",
+                                minute: "2-digit",
+                                second: "2-digit",
+                            });
+                        }
+                        return f.format(new Date());
                     } catch (e) {
                         return "--:--:--";
                     }
@@ -2770,7 +2781,8 @@
                 }
 
                 // 每秒刷新一次顶部显示的时间
-                setInterval(updateToolbarClock, 1000);
+                setInterval(function () { if (!document.hidden) updateToolbarClock(); }, 1000);
+                document.addEventListener("visibilitychange", function () { if (!document.hidden) updateToolbarClock(); });
                 updateToolbarClock();
 
                 // 点击时间文字：打开/关闭时区选择下拉框
@@ -3393,7 +3405,7 @@
                 });
 
                 function buildZoomableImage(src) {
-                    return $("<img>")
+                    return $("<img>").attr({ loading: "lazy", decoding: "async" })
                         .attr("src", src)
                         .addClass("zoomable-image")
                         .css({
@@ -3800,9 +3812,17 @@
 
                     immersiveApi = { set: setImmersive, reset: resetIdleTimer };
 
+                    // 鼠标移动 / 滚轮每秒会触发上百次，这里限流到约 150ms 一次（对"几秒后自动隐藏"的精度没有影响）
+                    let lastActivity = 0;
+                    function onActivity() {
+                        const now = Date.now();
+                        if (!immersiveOn && now - lastActivity < 150) return;
+                        lastActivity = now;
+                        resetIdleTimer();
+                    }
                     $(document).on(
                         "mousemove.immersive mousedown.immersive keydown.immersive touchstart.immersive wheel.immersive",
-                        resetIdleTimer
+                        onActivity
                     );
                     $contentArea.on("mouseenter.immersive", function () { mouseInContent = true; resetIdleTimer(); });
                     $contentArea.on("mouseleave.immersive", function () { mouseInContent = false; resetIdleTimer(); });
@@ -4045,7 +4065,39 @@
 
                     opacitySlider.on("input", function () { applyOpacityValue(Number(this.value)); });
 
+                    // ---------- 特效开关 ----------
+                    const fxMap = { bottom: "#fxBottom", shine: "#fxShine", breath: "#fxBreath", copy: "#fxCopy", flow: "#fxFlow", uiblur: "#fxUiBlur", video: "#fxVideo", loopContent: "#fxLoopContent", loopBatch: "#fxLoopBatch" };
+                    let savedFx = Object.assign({ bottom: false, shine: false, breath: true, copy: false, flow: false, uiblur: true, video: true, loopContent: true, loopBatch: true }, savedSettings.fx || {});
+                    function applyFx(fx) {
+                        const root = document.documentElement.classList;
+                        root.toggle("fx-no-bottom", !fx.bottom);
+                        root.toggle("fx-no-shine", !fx.shine);
+                        root.toggle("fx-no-breath", !fx.breath);
+                        root.toggle("fx-no-uiblur", !fx.uiblur);
+                        root.toggle("fx-no-loopcontent", !fx.loopContent);
+                        root.toggle("fx-no-loopbatch", !fx.loopBatch);
+                        window.FX_VIDEO = !!fx.video;
+                        if (window.syncBgVideo) window.syncBgVideo();
+                        window.FX_COPY = !!fx.copy;
+                        window.FX_H4FLOW = !!fx.flow;
+                        if (window.applySubHeadStyles) window.applySubHeadStyles();
+                    }
+                    function readFxUI() {
+                        const fx = {};
+                        Object.keys(fxMap).forEach(function (k) { fx[k] = $(fxMap[k]).prop("checked"); });
+                        return fx;
+                    }
+                    function syncFxUI(fx) {
+                        Object.keys(fxMap).forEach(function (k) { $(fxMap[k]).prop("checked", !!fx[k]); });
+                    }
+                    syncFxUI(savedFx);
+                    applyFx(savedFx);
+                    // 勾选时立即预览；未点「保存设置」就关闭面板会恢复
+                    $(Object.keys(fxMap).map(function (k) { return fxMap[k]; }).join(",")).on("change", function () { applyFx(readFxUI()); });
+
                     function closeAndRevert() {
+                        syncFxUI(savedFx);
+                        applyFx(savedFx);
                         menuColors = savedMenuColors.slice();
                         renderColorRows(savedMenuColors);
                         applyMenuColors();
@@ -4072,7 +4124,9 @@
                         savedMenuColors = menuColors.slice();
                         applyMenuColors();
 
-                        if (saveUiSettings({ opacity: opacityVal, hideTime: hideTimeVal, menuColors: savedMenuColors })) {
+                        savedFx = readFxUI();
+                        applyFx(savedFx);
+                        if (saveUiSettings({ opacity: opacityVal, hideTime: hideTimeVal, menuColors: savedMenuColors, fx: savedFx })) {
                             showToast("设置已保存 ✨");
                         }
                         opacityPanel.removeClass("open");
@@ -4171,6 +4225,184 @@
                 // 【新增】清除按钮：清空本地保存的内容（文件内容/手动新增/自定义背景/界面设置等），
                 // 确认后刷新页面，恢复到最初的"使用说明"状态
                 // ======================
+                (function initAutoBackup() {
+                    const CFG_KEY = "autoBackupCfg";   // { enabled, lastMonth, lastTime, target }
+                    const HANDLE_DB = "autoBackupDB", HANDLE_STORE = "handles", HANDLE_KEY = "file";
+                    const canPick = typeof window.showSaveFilePicker === "function";
+                    let running = false, gestureArmed = false;
+
+                    function loadCfg() {
+                        const d = { enabled: true, lastMonth: "", lastTime: "", target: "" };
+                        try { const raw = localStorage.getItem(CFG_KEY); return raw ? Object.assign(d, JSON.parse(raw)) : d; }
+                        catch (e) { return d; }
+                    }
+                    function saveCfg(c) { try { localStorage.setItem(CFG_KEY, JSON.stringify(c)); } catch (e) { } }
+                    function monthKey() {
+                        const d = new Date();
+                        return d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2);
+                    }
+                    function baseName() { return (($("title").text() || "").trim() || "导出内容") + "-自动备份.json"; }
+
+                    // ---- 备份文件句柄存 IndexedDB（只有 Chrome / Edge 电脑版支持） ----
+                    function openDB() {
+                        return new Promise(function (resolve, reject) {
+                            if (!window.indexedDB) return reject(new Error("no idb"));
+                            const req = indexedDB.open(HANDLE_DB, 1);
+                            req.onupgradeneeded = function (e) { e.target.result.createObjectStore(HANDLE_STORE); };
+                            req.onsuccess = function (e) { resolve(e.target.result); };
+                            req.onerror = function (e) { reject(e.target.error); };
+                        });
+                    }
+                    function getHandle() {
+                        return openDB().then(function (db) {
+                            return new Promise(function (resolve) {
+                                const r = db.transaction(HANDLE_STORE, "readonly").objectStore(HANDLE_STORE).get(HANDLE_KEY);
+                                r.onsuccess = function () { resolve(r.result || null); };
+                                r.onerror = function () { resolve(null); };
+                            });
+                        }).catch(function () { return null; });
+                    }
+                    function putHandle(h) {
+                        return openDB().then(function (db) {
+                            return new Promise(function (resolve, reject) {
+                                const tx = db.transaction(HANDLE_STORE, "readwrite");
+                                tx.objectStore(HANDLE_STORE).put(h, HANDLE_KEY);
+                                tx.oncomplete = function () { resolve(true); };
+                                tx.onerror = function (e) { reject(e.target.error); };
+                            });
+                        });
+                    }
+
+                    function buildText() {
+                        const blocks = collectOutputBlocks();
+                        if (!blocks.length) return null; // 没有内容时不备份，避免用空内容覆盖旧备份
+                        return JSON.stringify({ version: 1, blocks: blocks }, null, 2);
+                    }
+
+                    function downloadText(text) {
+                        const blob = new Blob([text], { type: "application/json;charset=utf-8" });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement("a");
+                        a.href = url; a.download = baseName();
+                        document.body.appendChild(a); a.click();
+                        setTimeout(function () { document.body.removeChild(a); URL.revokeObjectURL(url); }, 300);
+                    }
+
+                    // 返回 "ok" | "need-gesture" | "denied"
+                    async function writeHandle(handle, text, allowPrompt) {
+                        let perm = await handle.queryPermission({ mode: "readwrite" });
+                        if (perm !== "granted") {
+                            if (!allowPrompt) return "need-gesture";
+                            perm = await handle.requestPermission({ mode: "readwrite" });
+                            if (perm !== "granted") return "denied";
+                        }
+                        const w = await handle.createWritable();
+                        await w.write(text);
+                        await w.close();
+                        return "ok";
+                    }
+
+                    function markDone(targetLabel) {
+                        const c = loadCfg();
+                        c.lastMonth = monthKey();
+                        c.lastTime = new Date().toLocaleString("zh-CN", { hour12: false });
+                        c.target = targetLabel;
+                        saveCfg(c);
+                        refreshStatus();
+                    }
+
+                    // force=true：忽略"本月是否已备份"（用于"立即备份"）；fromGesture：当前处于用户点击中，可以弹权限请求
+                    async function runBackup(force, fromGesture) {
+                        if (running) return;
+                        const cfg = loadCfg();
+                        if (!force) {
+                            if (!cfg.enabled) return;
+                            if (!cfg.lastMonth) { cfg.lastMonth = monthKey(); saveCfg(cfg); return; } // 首次启用：从下个月开始
+                            if (cfg.lastMonth === monthKey()) return;
+                        }
+                        const text = buildText();
+                        if (!text) { if (force) showToast("暂无可备份的内容"); return; }
+                        running = true;
+                        try {
+                            const handle = canPick ? await getHandle() : null;
+                            if (handle) {
+                                const r = await writeHandle(handle, text, !!fromGesture);
+                                if (r === "ok") {
+                                    markDone(handle.name || "已选择的文件");
+                                    showToast("💾 已自动备份并覆盖 " + (handle.name || "备份文件"));
+                                    return;
+                                }
+                                if (r === "need-gesture") { armGesture(); return; }
+                                // 用户拒绝授权：退回普通下载
+                            }
+                            downloadText(text);
+                            markDone("浏览器下载文件夹");
+                            showToast("💾 已自动备份（已下载到默认下载文件夹）");
+                        } catch (e) {
+                            console.warn("自动备份失败:", e);
+                            if (force) showToast("备份失败：" + (e && e.message ? e.message : "未知错误"));
+                        } finally {
+                            running = false;
+                        }
+                    }
+
+                    // 需要用户授权写入时，等第一次点击 / 按键再执行（浏览器要求授权必须由用户操作触发）
+                    function armGesture() {
+                        if (gestureArmed) return;
+                        gestureArmed = true;
+                        const handler = function () {
+                            document.removeEventListener("pointerdown", handler, true);
+                            document.removeEventListener("keydown", handler, true);
+                            gestureArmed = false;
+                            runBackup(false, true);
+                        };
+                        document.addEventListener("pointerdown", handler, true);
+                        document.addEventListener("keydown", handler, true);
+                    }
+
+                    function refreshStatus() {
+                        const c = loadCfg();
+                        $("#autoBackupEnable").prop("checked", !!c.enabled);
+                        let t = c.lastTime ? "上次备份：" + c.lastTime + "（" + (c.target || "") + "）" : "还没有备份过";
+                        getHandle().then(function (h) {
+                            if (canPick) t += h ? "\n备份文件：" + h.name : "\n未选择备份文件，将下载到默认下载文件夹";
+                            else t += "\n当前浏览器不支持选择备份文件，将下载到默认下载文件夹";
+                            $("#autoBackupStatus").css("white-space", "pre-line").text(t);
+                        });
+                    }
+
+                    if (!canPick) $("#autoBackupPickBtn").hide();
+                    refreshStatus();
+
+                    $("#autoBackupEnable").on("change", function () {
+                        const c = loadCfg();
+                        c.enabled = this.checked;
+                        if (c.enabled && !c.lastMonth) c.lastMonth = monthKey();
+                        saveCfg(c);
+                        showToast(c.enabled ? "已开启每月自动备份 💾" : "已关闭自动备份");
+                    });
+
+                    $("#autoBackupPickBtn").on("click", async function () {
+                        try {
+                            const handle = await window.showSaveFilePicker({
+                                suggestedName: baseName(),
+                                types: [{ description: "JSON 备份", accept: { "application/json": [".json"] } }],
+                            });
+                            await putHandle(handle);
+                            refreshStatus();
+                            showToast("已选择备份文件，之后每月自动覆盖它 📁");
+                        } catch (e) {
+                            if (e && e.name !== "AbortError") showToast("选择失败：" + (e.message || "未知错误"));
+                        }
+                    });
+
+                    $("#autoBackupNowBtn").on("click", function () { runBackup(true, true); });
+
+                    // 页面打开后稍等内容恢复完成再检查；页面长时间开着时每 30 分钟再检查一次（跨月也能触发）
+                    setTimeout(function () { runBackup(false, false); }, 2500);
+                    setInterval(function () { if (!document.hidden) runBackup(false, false); }, 30 * 60 * 1000);
+                })();
+
                 (function initClearButton() {
                     $("#btnClear").on("click", function () {
                         showConfirmDialog(
@@ -7371,16 +7603,6 @@
 #output>h5[data-sub]{padding:2px 12px;font-size:13px}
 #output>h4[data-sub]:hover,#output>h5[data-sub]:hover{transform:translateY(-1px)}
 
-/* h4-A 霓虹青胶囊：呼吸光晕 + 前置光点脉冲 */
-#output>h4[data-sub="0"]{color:#9ffcff;padding:4px 16px 4px 12px;border:1px solid #22e3ff;border-radius:999px;
- text-shadow:0 0 6px #22e3ff;background:linear-gradient(90deg,rgba(5,25,50,.82),rgba(8,48,86,.72));
- box-shadow:inset 0 0 8px rgba(34,227,255,.25)}
-#output>h4[data-sub="0"]::before{content:"";display:inline-block;width:7px;height:7px;margin-right:8px;vertical-align:1px;
- border-radius:50%;background:#22e3ff;box-shadow:0 0 6px #22e3ff;animation:subDot 1.6s ease-in-out infinite}
-#output>h4[data-sub="0"]::after{content:"";position:absolute;inset:-1px;border-radius:inherit;pointer-events:none;opacity:.3;
- box-shadow:0 0 8px 1px rgba(34,227,255,.9),0 0 16px 2px rgba(34,227,255,.45);animation:subGlow 2.4s ease-in-out infinite}
-@keyframes subGlow{0%,100%{opacity:.3}50%{opacity:1}}
-@keyframes subDot{0%,100%{opacity:.45;transform:scale(.8)}50%{opacity:1;transform:scale(1.15)}}
 /* h4-B 流光边框 */
 #output>h4[data-sub="1"]{color:#fff;border:2px solid transparent;border-radius:20px;text-shadow:0 1px 3px rgba(0,0,0,.6);
  background:linear-gradient(#1b1030,#1b1030) padding-box,linear-gradient(90deg,#ff00cc,#3333ff,#00ffcc,#ff00cc) border-box;
@@ -7391,16 +7613,6 @@
  background:linear-gradient(90deg,#ffc300,#ff6a00);clip-path:polygon(0 0,calc(100% - 12px) 0,100% 100%,0 100%);overflow:hidden}
 #output>h4[data-sub="2"]::after{content:"";position:absolute;inset:0;pointer-events:none;transform:translateX(-120%);
  background:linear-gradient(105deg,transparent 30%,rgba(255,255,255,.65) 50%,transparent 70%);animation:subShine 3.5s ease-in-out infinite}
-/* h4-D 玻璃扫光 */
-/* 底层一层淡深色保证白字在亮背景上也清晰；上层紫→青→粉渐变半透明，深/浅/彩色背景都能透出并协调 */
-#output>h4[data-sub="3"]{color:#fff;overflow:hidden;border:1px solid rgba(255,255,255,.6);border-radius:10px;
- text-shadow:0 1px 3px rgba(0,0,0,.65);
- background:linear-gradient(135deg,rgba(124,92,255,.62) 0%,rgba(0,190,255,.45) 50%,rgba(255,110,210,.58) 100%),
-            linear-gradient(rgba(12,16,40,.3),rgba(12,16,40,.3));
- box-shadow:0 4px 14px rgba(0,0,0,.28),inset 0 1px 0 rgba(255,255,255,.45);
- -webkit-backdrop-filter:blur(8px) saturate(1.4);backdrop-filter:blur(8px) saturate(1.4)}
-#output>h4[data-sub="3"]::after{content:"";position:absolute;inset:0;pointer-events:none;transform:translateX(-120%);
- background:linear-gradient(105deg,transparent 30%,rgba(255,255,255,.5) 50%,transparent 70%);animation:subShine 4s ease-in-out infinite}
 @keyframes subShine{0%,40%{transform:translateX(-120%)}100%{transform:translateX(120%)}}
 
 /* h5-A 薄荷胶囊 */
@@ -7538,6 +7750,67 @@ body.batchMode #output>h4.batchSelected{overflow:visible;clip-path:none}
 .imgNameBox.sel::after{content:"✓";position:absolute;top:6px;right:6px;width:22px;height:22px;line-height:22px;border-radius:50%;
  background:linear-gradient(135deg,#ff3d6e,#ff9a3d);color:#fff;font-size:13px;font-weight:700;text-align:center;
  box-shadow:0 0 0 2px #fff,0 3px 10px rgba(255,61,110,.7);animation:batchBadgePop .3s cubic-bezier(.3,1.6,.5,1) both}
+.fxList { display: flex; flex-direction: column; gap: 6px; }
+.fxItem { display: flex !important; align-items: center; gap: 8px; margin: 0 !important; font-size: 13px; color: #333; cursor: pointer; }
+.abStatus { margin: 8px 0 4px; font-size: 12px; line-height: 1.6; color: #5a7286; word-break: break-all; }
+.fxItem input { width: 16px; height: 16px; flex: none; accent-color: #8b5cf6; }
+</style>
+<style id="panelHeaderFix">
+/* 弹窗内容较长时在面板内滚动，顶部标题栏固定不动（粘在滚动容器顶部） */
+.addPanel .addPanelHeader{position:sticky;top:0;z-index:5}
+.addPanelHeaderBtns{display:flex;align-items:center;gap:8px}
+/* 关闭按钮左边的"保存配置" */
+.addPanelSave{cursor:pointer;border:none;height:24px;padding:0 12px;border-radius:12px;background:rgba(255,255,255,.95);color:#6d4fe0;
+ font-size:12px;font-weight:600;line-height:24px;white-space:nowrap;box-shadow:0 1px 4px rgba(0,0,0,.18);
+ transition:filter .15s ease,transform .15s ease}
+.addPanelSave:hover{filter:brightness(.96);transform:translateY(-1px)}
+.addPanelSave:active{transform:scale(.96)}
+</style>
+<style id="fxToggleStyles">
+/* ===== 设置里可单独关闭的特效（默认全部开启；关闭时由 JS 给 <html> 加对应的 fx-no-* 类） ===== */
+/* 底部时间栏：关闭毛玻璃模糊，改用不透明纯色 */
+html.fx-no-bottom .bottom {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    background: rgba(20, 110, 140, 0.88);
+}
+/* 左侧菜单：关闭扫光（选中按钮的呼吸光不受影响） */
+html.fx-no-shine #h3List li:not(.highlight)::after {
+    display: none;
+}
+/* 面板 / 弹窗 / 右键菜单 / 批量操作栏：关闭毛玻璃模糊（背景会更透） */
+html.fx-no-uiblur .addPanel,
+html.fx-no-uiblur .confirmOverlay,
+html.fx-no-uiblur .confirmDialog,
+html.fx-no-uiblur .ctxMenu,
+html.fx-no-uiblur .timeDropdown,
+html.fx-no-uiblur .batchModeBar {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+}
+/* 内容区循环光效：暂停（停在初始画面） */
+html.fx-no-loopcontent #output .divHighlight::before,
+html.fx-no-loopcontent #output .highlight::before,
+html.fx-no-loopcontent #output>div.divHighlight:not(.batchSelected)::after,
+html.fx-no-loopcontent #output>div p.highlight:not(.batchSelected)::after,
+html.fx-no-loopcontent #output>h4[data-sub="1"],
+html.fx-no-loopcontent #output>h4[data-sub="2"]::after {
+    animation-play-state: paused !important;
+}
+/* 批量模式循环动效：暂停（批量栏的"滑入"是第一个动画，保持播放，只暂停第二个"边框流动"） */
+html.fx-no-loopbatch .batchModeBar.hasSel .batchModeBtns .batchDeleteBtn,
+html.fx-no-loopbatch .batchInfoIcon,
+html.fx-no-loopbatch body.batchMode::after {
+    animation-play-state: paused !important;
+}
+html.fx-no-loopbatch .batchModeBar.open {
+    animation-play-state: running, paused !important;
+}
+/* 左侧菜单：关闭选中按钮的呼吸灯（外圈光晕 + 内侧边缘光） */
+html.fx-no-breath #h3List li.highlight::before,
+html.fx-no-breath #h3List li.highlight::after {
+    display: none !important;
+}
 </style>
 </head>
 
@@ -7699,7 +7972,10 @@ body.batchMode #output>h4.batchSelected{overflow:visible;clip-path:none}
     <div class="addPanel" id="opacityPanel">
         <div class="addPanelHeader">
             <h4>⚙️ 设置</h4>
-            <button class="addPanelClose" id="opacityPanelClose">×</button>
+            <div class="addPanelHeaderBtns">
+                <button class="addPanelSave" id="opacityPanelSave" type="button" title="保存当前设置">保存配置</button>
+                <button class="addPanelClose" id="opacityPanelClose">×</button>
+            </div>
         </div>
         <div class="addTabContent">
             <div class="settingRow">
@@ -7720,6 +7996,32 @@ body.batchMode #output>h4.batchSelected{overflow:visible;clip-path:none}
                     <button class="panelBtn secondaryBtn" id="menuColorAddBtn" type="button">➕ 添加区间</button>
                     <button class="panelBtn secondaryBtn" id="menuColorClearBtn" type="button">恢复默认色</button>
                 </div>
+            </div>
+            <div class="settingRow">
+                <label>✨ 特效开关（勾选 = 开启，取消勾选可降低资源占用；修改后立即预览，点「保存设置」才会保留）</label>
+                <div class="fxList">
+                    <label class="fxItem"><input type="checkbox" id="fxBottom" /><span>底部时间栏的毛玻璃模糊</span></label>
+                    <label class="fxItem"><input type="checkbox" id="fxShine" /><span>左侧菜单的扫光</span></label>
+                    <label class="fxItem"><input type="checkbox" id="fxBreath" checked /><span>左侧菜单选中按钮的呼吸灯</span></label>
+                    <label class="fxItem"><input type="checkbox" id="fxFlow" /><span>小标题(h4)使用「流光边框」样式（不勾选时全部用「金橙斜切」）</span></label>
+                    <label class="fxItem"><input type="checkbox" id="fxCopy" /><span>点击复制时的动效（色彩波动、粒子、爱心）</span></label>
+                    <label class="fxItem"><input type="checkbox" id="fxUiBlur" checked /><span>面板、弹窗、右键菜单、批量操作栏的毛玻璃模糊</span></label>
+                    <label class="fxItem"><input type="checkbox" id="fxVideo" checked /><span>视频背景播放（取消勾选 = 暂停，只显示静止画面）</span></label>
+                    <label class="fxItem"><input type="checkbox" id="fxLoopContent" checked /><span>内容区的循环光效（小标题流动光、高亮块脉冲）</span></label>
+                    <label class="fxItem"><input type="checkbox" id="fxLoopBatch" checked /><span>批量模式的循环动效（边框流动、图标晃动、删除按钮脉冲、四周光晕）</span></label>
+                </div>
+            </div>
+            <div class="settingRow">
+                <label>💾 自动备份（每月自动导出一份 JSON，下个月覆盖上一份）</label>
+                <div class="fxList">
+                    <label class="fxItem"><input type="checkbox" id="autoBackupEnable" checked /><span>开启每月自动备份</span></label>
+                </div>
+                <div class="abStatus" id="autoBackupStatus"></div>
+                <div class="panelBtnRow">
+                    <button class="panelBtn secondaryBtn" id="autoBackupPickBtn" type="button">📁 选择备份文件</button>
+                    <button class="panelBtn secondaryBtn" id="autoBackupNowBtn" type="button">⬇️ 立即备份</button>
+                </div>
+                <div class="mcHint" style="margin-top:6px;font-size:11px;line-height:1.5;color:#8a90a6;">需要在那一天（或之后）打开过本页面才会执行。电脑版 Chrome / Edge 选择备份文件后可自动覆盖同一个文件；其它浏览器会下载到默认下载文件夹（重名时自动加序号，不会覆盖）。</div>
             </div>
             <button class="panelBtn" id="opacitySaveBtn" type="button" style="width:100%;">✅ 保存设置</button>
         </div>
@@ -7943,24 +8245,43 @@ body.batchMode #output>h4.batchSelected{overflow:visible;clip-path:none}
         })();
     </script>
 <script>
+/* 背景视频播放控制（图片背景不受影响）：
+   页面切到后台时暂停、回来再继续；设置里取消「视频背景播放」时一直暂停，只显示静止画面。 */
+window.syncBgVideo = function () {
+    var v = document.getElementById("background-video");
+    if (!v || v.tagName !== "VIDEO") return;
+    if (document.hidden || window.FX_VIDEO === false) { try { v.pause(); } catch (e) { } }
+    else { var p = v.play(); if (p && p.catch) p.catch(function () { }); }
+};
+document.addEventListener("visibilitychange", window.syncBgVideo);
+/* 页面代码重新创建或播放背景视频时（切换背景等），在捕获阶段拦截 play 事件，保持暂停 */
+document.addEventListener("play", function (e) {
+    var t = e.target;
+    if (t && t.id === "background-video" && window.FX_VIDEO === false) { try { t.pause(); } catch (_) { } }
+}, true);
+window.syncBgVideo();
+</script>
+<script>
 /* 小标题样式轮换：#output 里的 h4、h5 各自按出现顺序，每连续 3 个换一种样式（共 4 种循环）。
    导入 / 新增 / 插入 / 删除后内容变化会自动重新编号。 */
 (function () {
     var out = document.getElementById("output");
     if (!out) return;
-    var STYLES = 4, GROUP = 3, raf = 0;
+    var STYLES = 4, GROUP = 3, raf = 0, H4_STYLES_ALL = [1, 2];
+    function h4Styles() { return window.FX_H4FLOW ? H4_STYLES_ALL : [2]; }
     function apply() {
         raf = 0;
         var c4 = 0, c5 = 0;
         Array.prototype.forEach.call(out.children, function (el) {
             var v = null;
-            if (el.tagName === "H4") v = Math.floor(c4++ / GROUP) % STYLES;
+            if (el.tagName === "H4") v = h4Styles()[Math.floor(c4++ / GROUP) % h4Styles().length]; /* 流光边框(1) 默认不用，只用金橙斜切(2)；设置里勾选后两种轮换 */
             else if (el.tagName === "H5") v = Math.floor(c5++ / GROUP) % STYLES;
             if (v !== null && el.getAttribute("data-sub") !== String(v)) el.setAttribute("data-sub", v);
         });
     }
     new MutationObserver(function () { if (!raf) raf = requestAnimationFrame(apply); })
         .observe(out, { childList: true });
+    window.applySubHeadStyles = apply;
     apply();
 })();
 </script>
@@ -8106,6 +8427,15 @@ body.batchMode #output>h4.batchSelected{overflow:visible;clip-path:none}
             sb.classList.remove("hov");
             if (sb._img) sb._img.classList.remove("imgHov");
         }
+        /* 图片的放大标记(imgHov)可能比名称框的悬停标记(hov)活得更久（鼠标快速划过时先被 mouseout 清掉 hov），
+           所以还要按图片本身再清一遍，否则这些图片会一直放大、叠在一起 */
+        var stuck = out.querySelectorAll("img.imgHov");
+        for (var j = 0; j < stuck.length; j++) {
+            var im = stuck[j];
+            if (nb && nb._img === im) continue;
+            im.classList.remove("imgHov");
+            if (im._nb) im._nb.classList.remove("hov");
+        }
         if (nb) {
             if (!nb.classList.contains("hov")) nb.classList.add("hov");
             if (nb._img && !nb._img.classList.contains("imgHov")) nb._img.classList.add("imgHov");
@@ -8133,7 +8463,7 @@ body.batchMode #output>h4.batchSelected{overflow:visible;clip-path:none}
     out.addEventListener("mouseover", function (e) { if (e.target.tagName === "IMG" && e.target._nb) e.target._nb.classList.add("hov"); });
     out.addEventListener("mouseout", function (e) {
         var nb = e.target.tagName === "IMG" && e.target._nb;
-        if (nb && !nb.contains(e.relatedTarget)) nb.classList.remove("hov");
+        if (nb && !nb.contains(e.relatedTarget)) { nb.classList.remove("hov"); e.target.classList.remove("imgHov"); }
     });
     schedule();
 })();
@@ -8159,6 +8489,13 @@ body.batchMode #output>h4.batchSelected{overflow:visible;clip-path:none}
             Array.prototype.forEach.call(m.removedNodes, unwatch);
         });
     }).observe(out, { childList: true });
+})();
+</script>
+<script>
+/* 顶部"保存配置"按钮：直接触发底部"保存设置"按钮，复用同一套保存/校验逻辑 */
+(function () {
+    var top = document.getElementById("opacityPanelSave"), bottom = document.getElementById("opacitySaveBtn");
+    if (top && bottom) top.addEventListener("click", function () { bottom.click(); });
 })();
 </script>
 </body>
