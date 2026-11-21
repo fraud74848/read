@@ -75,8 +75,6 @@
             // UI显示/隐藏配置
             uiVisibility: {
                 fadeOutDelay: 10000, // 10秒后开始淡出
-                fadeOutDuration: 700, // 淡出动画持续时间
-                hideDelay: 1500, // 淡出后隐藏的延迟
             },
 
             // 复制文本效果配置
@@ -95,15 +93,6 @@
                 },
             },
 
-            // 鼠标轨迹效果配置
-            mouseRipple: {
-                maxRipples: 20, // 最大波纹数量
-                baseSize: 80, // 基础大小
-                speedFactor: 3, // 速度系数
-                maxSize: 400, // 最大尺寸
-                animationDuration: 1200, // 动画持续时间
-            },
-
             // 心跳动画配置
             heartAnimation: {
                 count: 3, // 每次点击产生的心形数量
@@ -117,12 +106,7 @@
         // 全局变量
         // ======================
         const pTags = [];
-        let highlightedTag = null;
         let highlightedLi = null;
-        let rippleCount = 0;
-        let lastX = 0,
-            lastY = 0;
-        let lastTime = 0;
         let notificationTimeout;
         let isAnimating = false;
         let lastH6Tag = null;
@@ -134,6 +118,47 @@
         const imgFormatCache = {};
         // 【新增】沉浸模式（统一淡入淡出）的对外开关，由"设置"面板初始化时赋值，供其它模块调用
         let immersiveApi = null;
+
+        // 【新增】把图片复制到系统剪贴板（缩略图的复制按钮、图片查看器的两个复制按钮共用）
+        // 返回 Promise：复制成功 resolve(true)，失败 resolve(false)；提示在这里统一弹出
+        function copyImageToClipboardGlobal(src) {
+            function tip(msg) { if (typeof showToastGlobal === "function") showToastGlobal(msg); }
+            if (!src) return Promise.resolve(false);
+            if (!navigator.clipboard || typeof window.ClipboardItem === "undefined") {
+                tip("当前浏览器不支持复制图片 😢");
+                return Promise.resolve(false);
+            }
+            // 剪贴板只稳定支持 image/png，其它格式（jpeg/webp/gif/svg…）统一用 canvas 转成 png
+            function toPng(blob) {
+                return new Promise(function (resolve, reject) {
+                    var objUrl = URL.createObjectURL(blob);
+                    var img = new Image();
+                    img.onload = function () {
+                        var canvas = document.createElement("canvas");
+                        canvas.width = img.naturalWidth;
+                        canvas.height = img.naturalHeight;
+                        canvas.getContext("2d").drawImage(img, 0, 0);
+                        canvas.toBlob(function (png) {
+                            URL.revokeObjectURL(objUrl);
+                            if (png) resolve(png); else reject(new Error("canvas toBlob 转换失败"));
+                        }, "image/png");
+                    };
+                    img.onerror = function (e) { URL.revokeObjectURL(objUrl); reject(e); };
+                    img.src = objUrl;
+                });
+            }
+            // 把"尚未完成的 Blob"直接交给 ClipboardItem，Safari 也能在用户点击手势内完成写入
+            var pngPromise = fetch(src).then(function (r) { return r.blob(); }).then(function (blob) {
+                return blob.type === "image/png" ? blob : toPng(blob);
+            });
+            return navigator.clipboard.write([new ClipboardItem({ "image/png": pngPromise })])
+                .then(function () { tip("图片已复制到剪贴板 📋"); return true; })
+                .catch(function (err) {
+                    console.error("复制图片失败:", err);
+                    tip("复制图片失败，可能是图片跨域限制 😢");
+                    return false;
+                });
+        }
 
         // 【新增】图片名称：本地上传的图片是 dataURL，文件名会以 ";name=xxx" 写进 dataURL 的参数里，
         // 这样刷新 / 导出 / 导入后名称都不会丢；网络图片和 "./图片名" 则直接取地址最后一段。
@@ -1236,7 +1261,7 @@
                     width: "100%",
                     height: "100%",
                     backgroundColor: "rgba(0, 0, 0, 0.9)",
-                    zIndex: 99999,
+                    zIndex: 100500, // 必须高于顶部工具栏(100001)，否则工具栏会盖在查看器上面
                     display: "none",
                     justifyContent: "center",
                     alignItems: "center",
@@ -1324,7 +1349,7 @@
 
                 // 【新增】创建"复制图片"按钮：点击后把当前查看的图片复制到系统剪贴板
                 const copyImageButton = $(
-                    '<div class="zoom-button copy-image" title="复制图片">📋</div>'
+                    '<div class="zoom-button copy-image" title="复制图片"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="pointer-events:none"><path d="M8 3.5h10.5A2.5 2.5 0 0 1 21 6v10.5"/><rect x="3" y="7.5" width="14" height="13.5" rx="2.5"/><circle cx="7.6" cy="11.6" r="1.2"/><path d="M3.5 19l4.3-4.4 3 3 2.2-2.2 4 3.6"/></svg></div>'
                 ).css({
                     position: "absolute",
                     bottom: "20px",
@@ -1341,6 +1366,36 @@
                     cursor: "pointer",
                     zIndex: 100000,
                 });
+
+                // 【新增】关闭按钮旁边的渐变胶囊"复制"按钮：复制当前图片后自动关闭查看器
+                const copyCloseButton = $(
+                    '<div class="copy-capsule" title="复制图片并关闭">复制</div>'
+                ).css({
+                    position: "absolute",
+                    top: "27px",
+                    right: "68px",
+                    height: "34px",
+                    padding: "0 20px",
+                    borderRadius: "999px",
+                    background: "linear-gradient(135deg, #ff3d6e 0%, #a24bff 55%, #3d8bff 100%)",
+                    color: "#fff",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: "15px",
+                    fontWeight: "600",
+                    letterSpacing: "2px",
+                    lineHeight: "1",
+                    cursor: "pointer",
+                    userSelect: "none",
+                    boxShadow: "0 4px 14px rgba(162, 75, 255, 0.45), inset 0 1px 0 rgba(255,255,255,.35)",
+                    transition: "transform .15s ease, filter .15s ease, box-shadow .15s ease",
+                    zIndex: 100000,
+                })
+                    .on("mouseenter", function () { $(this).css({ filter: "brightness(1.12)", transform: "translateY(-1px) scale(1.05)" }); })
+                    .on("mouseleave", function () { $(this).css({ filter: "none", transform: "none" }); })
+                    .on("mousedown", function () { $(this).css("transform", "scale(.95)"); })
+                    .on("mouseup", function () { $(this).css("transform", "translateY(-1px) scale(1.05)"); });
 
                 // 创建导航按钮
                 const prevButton = $('<div class="nav-button prev">❮</div>').css({
@@ -1413,6 +1468,7 @@
                 imageContainer.append(imageElement);
                 imageViewer.append(
                     closeButton,
+                    copyCloseButton,
                     zoomInButton,
                     zoomOutButton,
                     resetButton,
@@ -1443,6 +1499,7 @@
                     const src = $(allImages[index]).attr("src");
                     imageElement.attr("src", src);
                     imageViewer.css("display", "flex");
+                    $("body").addClass("imgViewerOpen"); // 打开查看器时隐藏顶部工具栏
                     updateCounter();
 
                     // 加载图片后计算适合的显示尺寸
@@ -1510,6 +1567,7 @@
 
                 function closeImageViewer() {
                     imageViewer.hide();
+                    $("body").removeClass("imgViewerOpen");
                     $("body").css("overflow", "auto");
                     imageElement.data("isDragging", false);
                 }
@@ -1570,75 +1628,19 @@
                 // 【新增】复制图片：点击查看器里的 📋 按钮，把当前正在查看的图片复制到系统剪贴板
                 copyImageButton.on("click", function (e) {
                     e.stopPropagation();
-                    copyCurrentImageToClipboard();
+                    copyCurrentImageAndClose();
+                });
+                // 顶部（关闭按钮旁）的复制按钮：同样复制后关闭
+                copyCloseButton.on("click", function (e) {
+                    e.stopPropagation();
+                    copyCurrentImageAndClose();
                 });
 
-                function copyCurrentImageToClipboard() {
-                    const src = imageElement.attr("src");
-                    if (!src) return;
-
-                    if (!navigator.clipboard || typeof window.ClipboardItem === "undefined") {
-                        notifyCopyResult(false, "当前浏览器不支持复制图片 😢");
-                        return;
-                    }
-
-                    fetch(src)
-                        .then((res) => res.blob())
-                        .then((blob) => {
-                            // 剪贴板 API 只支持有限的图片 MIME 类型（通常是 image/png、image/jpeg 等），
-                            // 其它格式（webp/gif/svg/未知类型等）统一先用 canvas 转成 png 再写入
-                            if (blob.type === "image/png" || blob.type === "image/jpeg") {
-                                return blob;
-                            }
-                            return convertBlobToPng(blob);
-                        })
-                        .then((finalBlob) =>
-                            navigator.clipboard.write([
-                                new ClipboardItem({ [finalBlob.type]: finalBlob }),
-                            ])
-                        )
-                        .then(() => {
-                            notifyCopyResult(true, "图片已复制到剪贴板 📋");
-                        })
-                        .catch((err) => {
-                            console.error("复制图片失败:", err);
-                            // 常见失败原因：跨域图片没有 CORS 权限导致无法读取像素/内容
-                            notifyCopyResult(false, "复制图片失败，可能是图片跨域限制 😢");
-                        });
-                }
-
-                // 把任意图片 Blob 转成 image/png 格式的 Blob（借助 canvas 重新绘制导出）
-                function convertBlobToPng(blob) {
-                    return new Promise((resolve, reject) => {
-                        const objUrl = URL.createObjectURL(blob);
-                        const img = new Image();
-                        img.onload = function () {
-                            const canvas = document.createElement("canvas");
-                            canvas.width = img.naturalWidth;
-                            canvas.height = img.naturalHeight;
-                            const ctx = canvas.getContext("2d");
-                            ctx.drawImage(img, 0, 0);
-                            canvas.toBlob(function (pngBlob) {
-                                URL.revokeObjectURL(objUrl);
-                                if (pngBlob) resolve(pngBlob);
-                                else reject(new Error("canvas toBlob 转换失败"));
-                            }, "image/png");
-                        };
-                        img.onerror = function (e) {
-                            URL.revokeObjectURL(objUrl);
-                            reject(e);
-                        };
-                        img.src = objUrl;
+                // 复制当前查看的图片；复制成功后关闭图片查看器（失败则保持打开，方便重试）
+                function copyCurrentImageAndClose() {
+                    copyImageToClipboardGlobal(imageElement.attr("src")).then(function (ok) {
+                        if (ok) closeImageViewer();
                     });
-                }
-
-                // 统一的复制结果提示：优先复用页面已有的 toast 提示，没有的话退回 alert
-                function notifyCopyResult(success, msg) {
-                    if (typeof showToastGlobal === "function") {
-                        showToastGlobal(msg);
-                    } else {
-                        console.log(msg);
-                    }
                 }
 
                 function resetImage() {
@@ -1971,13 +1973,6 @@
                     const idealPosition =
                         liTopRelative - (containerHeight / 2 - liHeight / 2);
 
-                    // 计算最小和最大滚动位置，确保上下保留部分内容可见
-                    const minScroll = Math.max(0, idealPosition - liHeight);
-                    const maxScroll = Math.min(
-                        listContainer.scrollHeight - containerHeight,
-                        idealPosition + liHeight
-                    );
-
                     // 确保不会滚动到列表边界之外
                     const targetScroll = Math.max(
                         0,
@@ -1998,10 +1993,6 @@
                     const start = element.scrollTop;
                     const change = target - start;
                     const startTime = performance.now();
-
-                    // 确保目标位置在有效范围内
-                    const maxScroll = element.scrollHeight - element.clientHeight;
-                    const clampedTarget = Math.max(0, Math.min(maxScroll, target));
 
                     function animateScroll(currentTime) {
                         const elapsed = currentTime - startTime;
@@ -2490,9 +2481,6 @@
             // ======================
             $(function () {
                 let media = $("#background-video");
-                const btn = $("#myElement");
-
-                let currentIndex = 0;
 
                 /**
                  * 初始化背景
@@ -2572,54 +2560,17 @@
                 function restoreDefaultBackground() {
                     revokeCurrentBgObjectUrl();
                     clearCustomBackground();
-                    currentIndex = 0;
                     initBackground();
                 }
 
                 applyCustomBackgroundGlobal = applyCustomBackground;
                 restoreDefaultBackgroundGlobal = restoreDefaultBackground;
 
-                /**
-                 * 切换背景媒体
-                 */
-                function changeMedia() {
-                    currentIndex = (currentIndex + 1) % CONFIG.backgroundMedia.length;
-                    const current = CONFIG.backgroundMedia[currentIndex];
-
-                    $("#background-video").fadeOut(300, function () {
-                        if (current.type === "video") {
-                            if ($(this).is("video")) {
-                                $(this).find("source").attr("src", current.src);
-                                this.load();
-                            } else {
-                                $(this).replaceWith(`
-                    <video id="background-video" preload="auto" autoplay loop muted>
-                      <source src="${current.src}" type="video/mp4" />
-                    </video>`);
-                            }
-                        } else if (current.type === "image") {
-                            if ($(this).is("img")) {
-                                $(this).attr("src", current.src);
-                            } else {
-                                $(this).replaceWith(`
-                    <img id="background-video" src="${current.src}" alt="background">`);
-                            }
-                        }
-
-                        media = $("#background-video");
-                        media.fadeIn(300);
-                    });
-                }
-
                 media = $("#background-video");
                 if (media.length === 0) {
                     console.error("背景元素丢失！");
                     return;
                 }
-
-                // 【修改】headContent(🍀 按钮) 原本用于快速切换背景，
-                // 现改为：点击后隐藏/显示顶部工具栏，不再触发 changeMedia
-                // （背景切换已有独立的"🖼️ 背景"面板可用）
 
                 // 【新增】优先使用之前保存过的自定义背景，没有的话才用默认背景列表
                 const savedCustomBg = loadCustomBackground();
@@ -3382,11 +3333,6 @@
                         $("#addImgUrlBtn").trigger("click");
                     }
                 });
-
-                function addToPreview(src) {
-                    pendingImages.push(src);
-                    renderPreview();
-                }
 
                 function renderPreview() {
                     previewGrid.empty();
@@ -5592,83 +5538,7 @@
             }
         }
 
-        .mouse-ripple {
-            position: fixed;
-            transition: all 1s ease-out;
-        }
-
-        /* 图片查看器样式 */
-        #image-viewer {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.9);
-            z-index: 99999;
-            display: none;
-            justify-content: center;
-            align-items: center;
-            cursor: zoom-out;
-            overflow: hidden;
-        }
-
-        #image-container {
-            position: relative;
-            width: 100%;
-            height: 100%;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            overflow: hidden;
-        }
-
-        #zoomed-image {
-            max-width: 90%;
-            max-height: 90%;
-            transition: transform 0.3s ease;
-            cursor: move;
-            position: absolute;
-            transform-origin: center center;
-        }
-
-        .close-button {
-            position: absolute;
-            top: 20px;
-            right: 20px;
-            color: white;
-            font-size: 40px;
-            cursor: pointer;
-            z-index: 100000;
-        }
-
-        .zoom-button {
-            position: absolute;
-            bottom: 20px;
-            background-color: rgba(0, 0, 0, 0.5);
-            color: white;
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            font-size: 30px;
-            cursor: pointer;
-            z-index: 100000;
-        }
-
-        .zoom-in {
-            right: 20px;
-        }
-
-        .zoom-out {
-            right: 80px;
-        }
-
-        .reset {
-            right: 140px;
-        }
+        /* 图片查看器的样式全部由 initImageZoom() 里的行内样式设置（见 JS），此处不再重复 */
 
         /* ======================
          【新增】固定菜单栏样式
@@ -5704,6 +5574,11 @@
         body.immersiveHidden .menuLeft,
         body.immersiveHidden .box1 {
             pointer-events: none !important;
+        }
+
+        /* 图片查看器打开时，顶部工具栏完全隐藏 */
+        body.imgViewerOpen .topToolbar {
+            visibility: hidden !important;
         }
 
         /* 【新增】点击 headContent(🍀 按钮) 手动隐藏/显示顶部工具栏。
@@ -7554,18 +7429,44 @@ body.immersiveHidden #output>h4[data-sub],body.immersiveHidden #output>h4[data-s
 .imgNameBox.hov{transform:scale(1.1)}
 #output img.imgHov{transform:scale(1.1)}
 .imgNameBar{position:absolute;left:0;right:0;bottom:0;height:26px;box-sizing:border-box;padding:0 28px;
- background:linear-gradient(to top,rgba(0,0,0,.78),rgba(0,0,0,.5))}
+ background:linear-gradient(to top,rgba(0,0,0,.78),rgba(0,0,0,.5));opacity:0;transition:opacity .25s ease}
+/* 只有鼠标经过图片（或正在改名）时才显示名称栏 */
+.imgNameBox.hov .imgNameBar,.imgNameBar.editing{opacity:1}
 .imgNameText{line-height:26px;text-align:center;font-size:12px;color:#fff;white-space:nowrap;overflow:hidden;
  text-overflow:ellipsis;text-shadow:0 1px 2px rgba(0,0,0,.6)}
 .imgNameBtn{position:absolute;right:4px;top:3px;width:20px;height:20px;padding:0;border:0;border-radius:50%;
- background:rgba(255,255,255,.25);cursor:pointer;pointer-events:auto;display:flex;align-items:center;justify-content:center;
+ background:rgba(255,255,255,.25);cursor:pointer;pointer-events:none;display:flex;align-items:center;justify-content:center;
  transition:background .2s ease}
+.imgNameBox.hov .imgNameBtn{pointer-events:auto}
+/* 右上角复制按钮：鼠标经过图片才出现，点击复制图片 */
+.imgCopyBtn{position:absolute;top:6px;right:6px;width:28px;height:28px;padding:0;border:0;border-radius:50%;
+ background:rgba(0,0,0,.55);cursor:pointer;display:flex;align-items:center;justify-content:center;
+ opacity:0;pointer-events:none;transition:opacity .25s ease,background .2s ease,transform .15s ease;
+ box-shadow:0 2px 8px rgba(0,0,0,.35)}
+.imgCopyBtn svg{width:15px;height:15px;fill:#fff;pointer-events:none}
+.imgNameBox.hov .imgCopyBtn{opacity:1;pointer-events:auto}
+.imgCopyBtn:hover{background:rgba(0,0,0,.8);transform:scale(1.12)}
+.imgCopyBtn:active{transform:scale(.94)}
+/* 批量选择模式下右上角留给 ✓ 徽章，不显示复制按钮 */
+body.batchMode .imgCopyBtn{display:none}
+/* 触屏设备没有"悬停"，保持常显 */
+@media (hover:none){
+ .imgNameBar{opacity:1}
+ .imgNameBtn{pointer-events:auto}
+ .imgCopyBtn{opacity:1;pointer-events:auto}
+}
 .imgNameBtn:hover{background:rgba(255,255,255,.5)}
 .imgNameBtn svg{width:12px;height:12px;fill:#fff;pointer-events:none}
 .imgNameInput{position:absolute;left:4px;right:4px;top:3px;height:20px;box-sizing:border-box;padding:0 8px;
  border:1px solid rgba(255,255,255,.7);border-radius:10px;background:rgba(255,255,255,.2);color:#fff;
  font-size:12px;text-align:center;outline:none;pointer-events:auto}
 .imgNameBar.editing .imgNameText,.imgNameBar.editing .imgNameBtn{display:none}
+</style>
+<style id="offscreenPause">
+/* ===== 性能优化：内容区里滚出屏幕的块（含小标题 h4/h5、高亮块）暂停动画，进入屏幕再恢复 =====
+   用 data-off 属性而不是 class，避免触发图片名称层对 class 变化的监听 */
+#output>[data-off],#output>[data-off]::before,#output>[data-off]::after,
+#output>[data-off] *,#output>[data-off] *::before,#output>[data-off] *::after{animation-play-state:paused!important}
 </style>
 <style id="batchFancy">
 /* ===== 批量删除美化：霓虹危险色主题 ===== */
@@ -8074,6 +7975,7 @@ body.batchMode #output>h4.batchSelected{overflow:visible;clip-path:none}
     layer.id = "imgNameLayer";
     box1.appendChild(layer);
     var boxes = [], raf = 0;
+    var COPY = '<svg viewBox="0 0 24 24"><path d="M16 1H4a2 2 0 0 0-2 2v14h2V3h12V1zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16H8V7h11v14z"/></svg>';
     var PENCIL = '<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.8 9.94l-3.75-3.75L3 17.25zm17.7-10.2a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>';
 
     function getBox(i) {
@@ -8093,6 +7995,17 @@ body.batchMode #output>h4.batchSelected{overflow:visible;clip-path:none}
             bar.appendChild(txt);
             bar.appendChild(btn);
             b.appendChild(bar);
+            var cbtn = document.createElement("button");
+            cbtn.type = "button";
+            cbtn.className = "imgCopyBtn";
+            cbtn.title = "复制图片";
+            cbtn.innerHTML = COPY;
+            cbtn.addEventListener("click", function (e) {
+                e.stopPropagation();
+                e.preventDefault();
+                if (b._img) copyImageToClipboardGlobal(b._img.getAttribute("src"));
+            });
+            b.appendChild(cbtn);
             b._bar = bar; b._txt = txt;
             btn.addEventListener("click", function (e) { e.stopPropagation(); startEdit(b); });
             /* 鼠标移到名称条上时，图片同步保持"悬停放大"，避免图片缩回去、名称条还在放大 */
@@ -8119,14 +8032,19 @@ body.batchMode #output>h4.batchSelected{overflow:visible;clip-path:none}
             b._img = d.im;
             if ((!d.name && !b._editing) || !d.w) { b.style.display = "none"; d.im._nb = null; continue; }
             d.im._nb = b;
-            b.style.display = "block";
-            /* 用中心点 + 布局宽高定位，悬停放大(transform)时位置也不会偏 */
-            b.style.left = (d.r.left + d.r.width / 2 - base.left - d.w / 2) + "px";
-            b.style.top = (d.r.top + d.r.height / 2 - base.top - d.h / 2) + "px";
-            b.style.width = d.w + "px";
-            b.style.height = d.h + "px";
+            if (b.style.display !== "block") b.style.display = "block";
+            /* 用中心点 + 布局宽高定位，悬停放大(transform)时位置也不会偏；位置没变就不重复写样式 */
+            var gl = (d.r.left + d.r.width / 2 - base.left - d.w / 2) + "px",
+                gt = (d.r.top + d.r.height / 2 - base.top - d.h / 2) + "px",
+                gw = d.w + "px", gh = d.h + "px", gk = gl + "|" + gt + "|" + gw + "|" + gh;
+            if (b._g !== gk) {
+                b._g = gk;
+                b.style.left = gl; b.style.top = gt; b.style.width = gw; b.style.height = gh;
+            }
             if (b._txt.textContent !== d.name) { b._txt.textContent = d.name; b._txt.title = d.name; }
-            b.classList.toggle("hov", d.im.matches(":hover") || b.matches(":hover"));
+            var isHov = d.im.matches(":hover") || b.matches(":hover");
+            b.classList.toggle("hov", isHov);
+            d.im.classList.toggle("imgHov", isHov);
             b.classList.toggle("sel", d.im.classList.contains("batchSelected"));
         }
         while (boxes.length > imgs.length) layer.removeChild(boxes.pop());
@@ -8155,6 +8073,7 @@ body.batchMode #output>h4.batchSelected{overflow:visible;clip-path:none}
             var val = input.value.trim();
             if (input.parentNode) input.parentNode.removeChild(input);
             b._bar.classList.remove("editing");
+            setTimeout(sweep, 0);
             if (save && val !== imgDisplayName(img)) {
                 /* 名称存在 data-name 上（不改 src，避免大图重新解码闪一下），保存内容时会写回 src */
                 img.setAttribute("data-name", val);
@@ -8172,7 +8091,42 @@ body.batchMode #output>h4.batchSelected{overflow:visible;clip-path:none}
         input.addEventListener("click", function (e) { e.stopPropagation(); });
     }
 
-    new MutationObserver(schedule).observe(out, { childList: true, subtree: true, attributes: true, attributeFilter: ["src", "data-name", "class"] });
+    /* ---- 悬停状态校正：以鼠标当前真实位置为准，避免输入框/按钮被移除后"离开"事件丢失，导致图片一直卡在放大状态 ---- */
+    var mx = null, my = null, sweepRaf = 0;
+    function sweep() {
+        sweepRaf = 0;
+        if (mx === null) return;
+        var el = document.elementFromPoint(mx, my), nb = null;
+        if (el) nb = (el.tagName === "IMG" && el._nb) ? el._nb : (el.closest ? el.closest(".imgNameBox") : null);
+        /* 清掉除当前悬停框之外所有仍带 hov 的框（只会有极少几个，原生选择器查询很快） */
+        var stale = layer.querySelectorAll(".imgNameBox.hov");
+        for (var i = 0; i < stale.length; i++) {
+            var sb = stale[i];
+            if (sb === nb) continue;
+            sb.classList.remove("hov");
+            if (sb._img) sb._img.classList.remove("imgHov");
+        }
+        if (nb) {
+            if (!nb.classList.contains("hov")) nb.classList.add("hov");
+            if (nb._img && !nb._img.classList.contains("imgHov")) nb._img.classList.add("imgHov");
+        }
+    }
+    document.addEventListener("mousemove", function (e) {
+        mx = e.clientX; my = e.clientY;
+        if (!sweepRaf) sweepRaf = requestAnimationFrame(sweep);
+    }, { passive: true });
+    document.addEventListener("mouseleave", function () { mx = null; for (var i = 0; i < boxes.length; i++) { boxes[i].classList.remove("hov"); if (boxes[i]._img) boxes[i]._img.classList.remove("imgHov"); } });
+    window.addEventListener("scroll", function () { if (!sweepRaf) sweepRaf = requestAnimationFrame(sweep); }, { passive: true });
+
+    /* 悬停时图片只会切换 imgHov 这个 class，与名称层的位置/内容无关，忽略它，避免每次悬停都对所有图片重新测量 */
+    function stripHov(c) { return (c || "").replace(/\bimgHov\b/g, "").replace(/\s+/g, " ").trim(); }
+    new MutationObserver(function (muts) {
+        for (var i = 0; i < muts.length; i++) {
+            var m = muts[i];
+            if (m.type !== "attributes" || m.attributeName !== "class" ||
+                stripHov(m.oldValue) !== stripHov(m.target.getAttribute("class"))) { schedule(); return; }
+        }
+    }).observe(out, { childList: true, subtree: true, attributes: true, attributeOldValue: true, attributeFilter: ["src", "data-name", "class"] });
     if ("ResizeObserver" in window) new ResizeObserver(schedule).observe(out);
     window.addEventListener("resize", schedule);
     out.addEventListener("load", schedule, true);
@@ -8182,6 +8136,29 @@ body.batchMode #output>h4.batchSelected{overflow:visible;clip-path:none}
         if (nb && !nb.contains(e.relatedTarget)) nb.classList.remove("hov");
     });
     schedule();
+})();
+</script>
+<script>
+/* 内容区动画只在可见时播放：用 IntersectionObserver 给滚出屏幕的块加 data-off，CSS 据此暂停动画。
+   上下各留 150px 余量，滚动时动画不会"现身时才开始"。不支持 IntersectionObserver 的浏览器自动忽略，动画照常播放。 */
+(function () {
+    var out = document.getElementById("output");
+    if (!out || !("IntersectionObserver" in window)) return;
+    var io = new IntersectionObserver(function (entries) {
+        entries.forEach(function (e) {
+            if (e.isIntersecting) e.target.removeAttribute("data-off");
+            else e.target.setAttribute("data-off", "1");
+        });
+    }, { root: null, rootMargin: "150px 0px", threshold: 0 });
+    function watch(n) { if (n.nodeType === 1) io.observe(n); }
+    function unwatch(n) { if (n.nodeType === 1) io.unobserve(n); }
+    Array.prototype.forEach.call(out.children, watch);
+    new MutationObserver(function (muts) {
+        muts.forEach(function (m) {
+            Array.prototype.forEach.call(m.addedNodes, watch);
+            Array.prototype.forEach.call(m.removedNodes, unwatch);
+        });
+    }).observe(out, { childList: true });
 })();
 </script>
 </body>
