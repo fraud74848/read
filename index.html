@@ -135,6 +135,61 @@
         // 【新增】沉浸模式（统一淡入淡出）的对外开关，由"设置"面板初始化时赋值，供其它模块调用
         let immersiveApi = null;
 
+        // 【新增】图片名称：本地上传的图片是 dataURL，文件名会以 ";name=xxx" 写进 dataURL 的参数里，
+        // 这样刷新 / 导出 / 导入后名称都不会丢；网络图片和 "./图片名" 则直接取地址最后一段。
+        function withFileName(dataUrl, name) {
+            if (!name || typeof dataUrl !== "string" || dataUrl.slice(0, 5) !== "data:") return dataUrl;
+            return dataUrl.replace(/^(data:[^;,]*)/, function (m) { return m + ";name=" + encodeURIComponent(name); });
+        }
+        // 批量读取本地图片文件 -> dataURL 数组（保持选择顺序，并带上文件名）
+        function readImageFiles(files) {
+            return Promise.all(Array.prototype.map.call(files, function (f) {
+                return new Promise(function (resolve) {
+                    var r = new FileReader();
+                    r.onload = function (e) { resolve(withFileName(e.target.result, f.name)); };
+                    r.onerror = function () { resolve(null); };
+                    r.readAsDataURL(f);
+                });
+            })).then(function (list) { return list.filter(Boolean); });
+        }
+        // 把输入框里的多个图片网址拆开：按空白 / 换行分隔（网址里一般没有空格）
+        function parseUrlList(text) {
+            return String(text || "").split(/\s+/).filter(function (u) { return u; });
+        }
+        function imgNameFromSrc(src) {
+            if (!src) return "";
+            if (src.slice(0, 5) === "data:") {
+                var m = /^data:[^,]*?;name=([^;,]+)/.exec(src.slice(0, 400));
+                if (!m) return "";
+                try { return decodeURIComponent(m[1]); } catch (e) { return m[1]; }
+            }
+            if (src.slice(0, 5) === "blob:") return "";
+            // 手动改过名的网络图片 / 相对路径图片：名称写在地址 #name= 之后（不影响图片加载）
+            var hm = /#name=([^#]*)$/.exec(src);
+            if (hm) { try { return decodeURIComponent(hm[1]); } catch (e) { return hm[1]; } }
+            var p = src.split("#")[0].split("?")[0];
+            p = p.substring(p.lastIndexOf("/") + 1);
+            try { p = decodeURIComponent(p); } catch (e) { }
+            return p;
+        }
+        // 把名称写进 src 里（name 为 null/undefined 时原样返回；为空字符串表示恢复默认名称）
+        function setImgName(src, name) {
+            if (typeof src !== "string" || name === null || name === undefined) return src;
+            var clean = src.slice(0, 5) === "data:"
+                ? src.replace(/^(data:[^,]*?);name=[^;,]+/, "$1")
+                : src.replace(/#name=[^#]*$/, "");
+            if (!name) return clean;
+            if (clean.slice(0, 5) === "data:") return withFileName(clean, name);
+            return clean + "#name=" + encodeURIComponent(name);
+        }
+        // 图片当前应显示的名称：优先用手动改过的 data-name，其次从 src 推出
+        function imgDisplayName(img) {
+            var dn = img.getAttribute("data-name");
+            if (dn) return dn;
+            var src = img.getAttribute("src") || "";
+            return imgNameFromSrc(dn === "" ? setImgName(src, "") : src);
+        }
+
         // ======================
         // 文件记忆功能
         // ======================
@@ -799,7 +854,7 @@
                                 blocks.push({ type: "hh", text: $(this).text() });
                             });
                         } else if (tag === "img") {
-                            blocks.push({ type: "image", src: $el.attr("src") || "" });
+                            blocks.push({ type: "image", src: setImgName($el.attr("src") || "", $el.attr("data-name")) });
                         } else if (tag === "div") {
                             $el.children("p").each(function () {
                                 const $p = $(this);
@@ -2874,6 +2929,8 @@
                 }
                 // 【新增】桥接给外层作用域的 processJsonFile / processCsvFile 使用，用于导入结果提示
                 showToastGlobal = showToast;
+                // 【新增】桥接给底部"图片名称"脚本：改名后立刻保存当前内容
+                window.persistOutputGlobal = function () { persistCurrentOutput(); };
 
                 // ======================
                 // 【新增】自定义删除确认弹窗（替代原生 window.confirm，样式与整体UI统一）
@@ -3298,28 +3355,29 @@
 
                 function handleImageFiles(files) {
                     if (!files.length) return;
-                    files.forEach((file) => {
-                        const reader = new FileReader();
-                        reader.onload = function (e) {
-                            addToPreview(e.target.result);
-                        };
-                        reader.readAsDataURL(file);
+                    // 批量读取后按选择顺序一次性加入预览（避免异步读取导致顺序错乱）
+                    readImageFiles(files).then((list) => {
+                        if (!list.length) return;
+                        pendingImages.push(...list);
+                        renderPreview();
                     });
                 }
 
                 $("#addImgUrlBtn").on("click", function () {
-                    const url = $("#addImgUrlInput").val();
-                    if (!url || !url.trim()) {
+                    const urls = parseUrlList($("#addImgUrlInput").val());
+                    if (!urls.length) {
                         showToast("请先输入图片网址");
                         return;
                     }
-                    addToPreview(url.trim());
+                    pendingImages.push(...urls);
+                    renderPreview();
+                    if (urls.length > 1) showToast(`已加入 ${urls.length} 张图片到预览`);
                     $("#addImgUrlInput").val("");
                 });
 
                 // 输入框回车即可直接加入预览，减少一次点击
                 $("#addImgUrlInput").on("keydown", function (e) {
-                    if (e.key === "Enter") {
+                    if (e.key === "Enter" && !e.shiftKey) {
                         e.preventDefault();
                         $("#addImgUrlBtn").trigger("click");
                     }
@@ -4208,7 +4266,8 @@
                     let ctxTarget = null;   // 当前右键点击的元素
                     let editTarget = null;  // 当前正在编辑的元素
                     let editingType = "";   // 'h3' | 'h4' | 'p' | 'img'
-                    let editPendingImgSrc = "";
+                    let editPendingImgs = []; // 待应用的图片：第 1 张替换当前图片，其余插入其后
+                    let editPendingTouched = false; // 用户是否已选择过新图片（没选过时列表里只有当前图片）
 
                     // ---- 右键弹出菜单 ----
                     $("#output").on("contextmenu", "h3, h4, p, img", function (e) {
@@ -4358,6 +4417,12 @@
                         const n = selectedBatchItems.size;
                         $batchSelectedCount.text(n);
                         $batchDeleteBtnCount.text(n);
+                        // 美化：有选中项时让删除按钮亮起，数量徽章弹一下
+                        $batchModeBar.toggleClass("hasSel", n > 0);
+                        const badgeEl = $batchSelectedCount[0];
+                        badgeEl.classList.remove("bump");
+                        void badgeEl.offsetWidth;
+                        badgeEl.classList.add("bump");
                     }
 
                     function clearBatchSelection() {
@@ -4507,14 +4572,11 @@
                             $("#editPanelTitle").text("✏️ 编辑图片");
                             $("#editTextWrap").hide();
                             $("#editImageWrap").show();
-                            editPendingImgSrc = $(target).attr("src") || "";
+                            const curSrc = $(target).attr("src") || "";
+                            editPendingImgs = curSrc ? [curSrc] : [];
+                            editPendingTouched = false;
                             $("#editImgUrlInput").val("");
-                            if (editPendingImgSrc) {
-                                $("#editImgPreviewImg").attr("src", editPendingImgSrc);
-                                $("#editImgPreviewWrap").show();
-                            } else {
-                                $("#editImgPreviewWrap").hide();
-                            }
+                            renderEditPreview();
                         } else {
                             $("#editImageWrap").hide();
                             $("#editTextWrap").show();
@@ -4537,13 +4599,27 @@
 
                     $("#editSaveBtn").on("click", function () {
                         if (!editTarget) return;
+                        let extraCount = 0;
 
                         if (editingType === "img") {
-                            if (!editPendingImgSrc) {
+                            if (!editPendingImgs.length) {
                                 showToast("请先选择或输入图片");
                                 return;
                             }
-                            $(editTarget).attr("src", editPendingImgSrc);
+                            const first = editPendingImgs[0];
+                            const rest = editPendingImgs.slice(1);
+                            // 第 1 张替换当前图片（没换图时保持原样，不丢手动改过的名称）
+                            if (first !== $(editTarget).attr("src")) {
+                                $(editTarget).removeAttr("data-name").attr("src", first);
+                            }
+                            // 其余图片按顺序插入到它后面
+                            let anchor = $(editTarget);
+                            rest.forEach((src) => {
+                                const im = buildZoomableImage(src);
+                                anchor.after(im);
+                                anchor = im;
+                            });
+                            extraCount = rest.length;
                         } else {
                             const val = $("#editTextInput").val() || "";
                             if (editingType === "p") {
@@ -4569,7 +4645,7 @@
 
                         persistCurrentOutput();
                         editPanel.removeClass("open");
-                        showToast("已保存修改 ✨");
+                        showToast(extraCount ? `已保存，并在后面新增 ${extraCount} 张图片 ✨` : "已保存修改 ✨");
                         editTarget = null;
                     });
 
@@ -4582,8 +4658,8 @@
                     });
 
                     editImgFileInput.on("change", function (event) {
-                        const file = (event.target.files || [])[0];
-                        if (file) handleEditImgFile(file);
+                        const files = Array.from(event.target.files || []);
+                        if (files.length) handleEditImgFiles(files);
                         event.target.value = "";
                     });
 
@@ -4603,34 +4679,62 @@
                         editImgDropZone.removeClass("dragover");
                         const dt = e.originalEvent.dataTransfer;
                         if (!dt) return;
-                        const file = Array.from(dt.files || []).find((f) =>
+                        const files = Array.from(dt.files || []).filter((f) =>
                             f.type.startsWith("image/")
                         );
-                        if (file) handleEditImgFile(file);
+                        if (files.length) handleEditImgFiles(files);
                     });
 
-                    function handleEditImgFile(file) {
-                        const reader = new FileReader();
-                        reader.onload = function (e) {
-                            editPendingImgSrc = e.target.result;
-                            $("#editImgPreviewImg").attr("src", editPendingImgSrc);
-                            $("#editImgPreviewWrap").show();
-                        };
-                        reader.readAsDataURL(file);
+                    // 渲染编辑面板的待应用图片预览（可逐张移除）
+                    function renderEditPreview() {
+                        const grid = $("#editImgPreviewGrid").empty();
+                        editPendingImgs.forEach((src, index) => {
+                            const item = $('<div class="imgPreviewItem">');
+                            const img = $("<img>").attr("src", src);
+                            const removeBtn = $('<button type="button" class="removeImgPreview">×</button>');
+                            removeBtn.on("click", function () {
+                                editPendingImgs.splice(index, 1);
+                                renderEditPreview();
+                            });
+                            item.append(img, removeBtn);
+                            grid.append(item);
+                        });
+                        $("#editImgCount").text(editPendingImgs.length);
+                        $("#editImgPreviewHeader").toggle(editPendingImgs.length > 0);
                     }
 
+                    // 加入新图片：第一次选择时先清掉"当前图片"（等于替换），之后继续选择则累加
+                    function addEditImgs(list) {
+                        if (!list.length) return;
+                        if (!editPendingTouched) {
+                            editPendingImgs = [];
+                            editPendingTouched = true;
+                        }
+                        editPendingImgs.push(...list);
+                        renderEditPreview();
+                    }
+
+                    function handleEditImgFiles(files) {
+                        readImageFiles(files).then(addEditImgs);
+                    }
+
+                    $("#editImgClearBtn").on("click", function () {
+                        editPendingImgs = [];
+                        editPendingTouched = true;
+                        renderEditPreview();
+                    });
+
                     $("#editImgUrlApplyBtn").on("click", function () {
-                        const url = $("#editImgUrlInput").val();
-                        if (!url || !url.trim()) {
+                        const urls = parseUrlList($("#editImgUrlInput").val());
+                        if (!urls.length) {
                             showToast("请先输入图片网址");
                             return;
                         }
-                        editPendingImgSrc = url.trim();
-                        $("#editImgPreviewImg").attr("src", editPendingImgSrc);
-                        $("#editImgPreviewWrap").show();
+                        addEditImgs(urls);
+                        $("#editImgUrlInput").val("");
                     });
                     $("#editImgUrlInput").on("keydown", function (e) {
-                        if (e.key === "Enter") {
+                        if (e.key === "Enter" && !e.shiftKey) {
                             e.preventDefault();
                             $("#editImgUrlApplyBtn").trigger("click");
                         }
@@ -4640,15 +4744,16 @@
                     $(document).on("paste.editPanel", function (e) {
                         if (!editPanel.hasClass("open") || editingType !== "img") return;
                         const items = (e.originalEvent.clipboardData || {}).items || [];
+                        const files = [];
                         for (let i = 0; i < items.length; i++) {
                             if (items[i].type && items[i].type.startsWith("image/")) {
                                 const f = items[i].getAsFile();
-                                if (f) {
-                                    handleEditImgFile(f);
-                                    showToast("已从剪贴板粘贴图片 📋");
-                                }
-                                break;
+                                if (f) files.push(f);
                             }
+                        }
+                        if (files.length) {
+                            handleEditImgFiles(files);
+                            showToast(`已从剪贴板粘贴 ${files.length} 张图片 📋`);
                         }
                     });
                 })();
@@ -6400,6 +6505,18 @@
             flex: 1;
         }
 
+        .imgUrlRow textarea {
+            flex: 1;
+            min-height: 38px;
+            resize: vertical;
+            padding: 8px 10px;
+            border: 1px solid #bbd0e4;
+            border-radius: 8px;
+            font-size: 13px;
+            font-family: inherit;
+            outline: none;
+        }
+
         .imgUrlRow button {
             white-space: nowrap;
         }
@@ -7429,6 +7546,98 @@
 /* 沉浸模式隐藏时暂停动画，省性能 */
 body.immersiveHidden #output>h4[data-sub],body.immersiveHidden #output>h4[data-sub]::before,body.immersiveHidden #output>h4[data-sub]::after{animation-play-state:paused}
 </style>
+<style id="imgNameStyles">
+/* ===== 图片名称：缩略图底部半透明名称条（覆盖层，不改动图片本身的 DOM），右侧带编辑图标 ===== */
+.box1{position:relative}
+#imgNameLayer{position:absolute;inset:0;pointer-events:none;z-index:2}
+.imgNameBox{position:absolute;border-radius:15px;overflow:hidden;transition:transform .3s ease-in-out}
+.imgNameBox.hov{transform:scale(1.1)}
+#output img.imgHov{transform:scale(1.1)}
+.imgNameBar{position:absolute;left:0;right:0;bottom:0;height:26px;box-sizing:border-box;padding:0 28px;
+ background:linear-gradient(to top,rgba(0,0,0,.78),rgba(0,0,0,.5))}
+.imgNameText{line-height:26px;text-align:center;font-size:12px;color:#fff;white-space:nowrap;overflow:hidden;
+ text-overflow:ellipsis;text-shadow:0 1px 2px rgba(0,0,0,.6)}
+.imgNameBtn{position:absolute;right:4px;top:3px;width:20px;height:20px;padding:0;border:0;border-radius:50%;
+ background:rgba(255,255,255,.25);cursor:pointer;pointer-events:auto;display:flex;align-items:center;justify-content:center;
+ transition:background .2s ease}
+.imgNameBtn:hover{background:rgba(255,255,255,.5)}
+.imgNameBtn svg{width:12px;height:12px;fill:#fff;pointer-events:none}
+.imgNameInput{position:absolute;left:4px;right:4px;top:3px;height:20px;box-sizing:border-box;padding:0 8px;
+ border:1px solid rgba(255,255,255,.7);border-radius:10px;background:rgba(255,255,255,.2);color:#fff;
+ font-size:12px;text-align:center;outline:none;pointer-events:auto}
+.imgNameBar.editing .imgNameText,.imgNameBar.editing .imgNameBtn{display:none}
+</style>
+<style id="batchFancy">
+/* ===== 批量删除美化：霓虹危险色主题 ===== */
+/* 顶部操作条：流动渐变描边 + 红色光晕 */
+.batchModeBar{border:1px solid transparent;
+ background:linear-gradient(135deg,rgba(24,18,38,.95),rgba(50,22,52,.93)) padding-box,
+            linear-gradient(90deg,#ff3d6e,#ff9a3d,#a24bff,#ff3d6e) border-box;
+ background-size:100% 100%,200% 100%;
+ box-shadow:inset 0 1px 0 rgba(255,255,255,.14),0 8px 28px rgba(255,61,110,.28),0 8px 24px rgba(10,16,28,.45)}
+.batchModeBar.open{animation:batchBarIn .28s ease both,batchBorderFlow 5s linear infinite}
+@keyframes batchBorderFlow{to{background-position:0 0,200% 0}}
+@keyframes batchWiggle{0%,70%,100%{transform:rotate(0)}76%{transform:rotate(-14deg)}82%{transform:rotate(12deg)}88%{transform:rotate(-8deg)}94%{transform:rotate(5deg)}}
+@keyframes batchBump{50%{transform:scale(1.4)}}
+/* 删除按钮：没选中时暗淡，选中后亮起并呼吸发光 */
+.batchModeBar .batchModeBtns .batchDeleteBtn{background:linear-gradient(135deg,#ff3d6e,#ff6a3d)!important;
+ border-color:rgba(255,255,255,.4);opacity:.5;filter:grayscale(.5)}
+.batchModeBar.hasSel .batchModeBtns .batchDeleteBtn{opacity:1;filter:none;animation:batchDangerPulse 1.8s ease-in-out infinite}
+.batchModeBar.hasSel .batchModeBtns .batchDeleteBtn:hover{filter:brightness(1.12)}
+@keyframes batchDangerPulse{0%,100%{box-shadow:inset 0 1px 0 rgba(255,255,255,.25),0 0 0 0 rgba(255,61,110,.55)}
+ 50%{box-shadow:inset 0 1px 0 rgba(255,255,255,.25),0 0 16px 3px rgba(255,61,110,.75)}}
+
+/* ===== 批量条布局：信息区两行（标题+数量 / 提示），按钮统一高度、不换行、不被撑大 ===== */
+.batchModeBar{flex-wrap:nowrap;align-items:center;gap:12px 18px;padding:10px 14px 10px 18px}
+.batchModeInfo{display:flex;flex-direction:column;gap:4px;flex:1 1 auto;min-width:0;line-height:1.3}
+.batchInfoTitle{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:600;color:#fff;white-space:nowrap}
+.batchInfoIcon{display:inline-block;transform-origin:50% 90%;animation:batchWiggle 2.6s ease-in-out infinite}
+.batchInfoCount{display:inline-flex;align-items:center;gap:5px;padding:2px 4px 2px 10px;border-radius:999px;
+ background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.12);font-size:12px;font-weight:500;color:rgba(255,255,255,.92)}
+.batchInfoCount b{display:inline-block;min-width:22px;padding:0 7px;border-radius:999px;background:linear-gradient(135deg,#ff3d6e,#ff9a3d);
+ color:#fff;font-weight:700;line-height:18px;text-align:center;box-shadow:0 0 10px rgba(255,61,110,.6)}
+.batchInfoCount b.bump{animation:batchBump .3s ease}
+.batchInfoHint{font-size:12px;color:rgba(255,255,255,.6);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.batchModeBtns{flex:none;flex-wrap:nowrap;align-items:center;gap:8px}
+.batchModeBar .batchModeBtns .panelBtn{flex:none;height:36px;padding:0 16px;display:inline-flex;align-items:center;justify-content:center;
+ gap:6px;white-space:nowrap;line-height:1}
+.batchModeBar .batchModeBtns .batchDeleteBtn b{display:inline-block;min-width:20px;padding:0 6px;border-radius:999px;
+ background:rgba(255,255,255,.92);color:#b01742;font-size:12px;line-height:20px;text-align:center}
+@media screen and (max-width:700px){
+ .batchModeBar{flex-direction:column;align-items:stretch;gap:10px;padding:10px 12px}
+ .batchInfoHint{white-space:normal}
+ .batchModeBtns{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+ .batchModeBar .batchModeBtns .panelBtn{padding:0 8px}
+ .batchModeBar .batchModeBtns .batchDeleteBtn{grid-column:1 / -1;order:-1}
+}
+/* 批量模式：屏幕四周一圈柔和的红色呼吸光，提示"正在危险操作" */
+body.batchMode::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:3;
+ box-shadow:inset 0 0 90px rgba(255,61,110,.28);animation:batchVignette 3s ease-in-out infinite}
+@keyframes batchVignette{0%,100%{opacity:.55}50%{opacity:1}}
+body.immersiveHidden.batchMode::after{animation-play-state:paused}
+
+/* 可选中提示：悬停时粉色虚线 + 光晕 */
+body.batchMode #output h3:hover,body.batchMode #output h4:hover,body.batchMode #output p:hover,body.batchMode #output img:hover{
+ outline-color:rgba(255,92,140,.9);box-shadow:0 0 14px rgba(255,61,110,.4)}
+
+/* 已选中：粉红渐变 + 发光描边 + 弹出的 ✓ 徽章 */
+.batchSelected{background:linear-gradient(135deg,#ff3d6e 0%,#d6246e 45%,#7a2cff 100%)!important;color:#fff!important;
+ outline:2px solid #ff7aa2!important;outline-offset:3px;
+ box-shadow:0 0 0 5px rgba(255,61,110,.22),0 0 20px rgba(255,61,110,.7)!important}
+.batchSelected::after,#output>h4.batchSelected::after{content:"✓";position:absolute;inset:auto;top:-11px;right:-11px;left:auto;bottom:auto;
+ width:22px;height:22px;line-height:22px;border-radius:50%;border:0;background:linear-gradient(135deg,#ff3d6e,#ff9a3d);
+ color:#fff;font-size:13px;font-weight:700;text-align:center;opacity:1;transform:none;z-index:5;pointer-events:none;
+ box-shadow:0 0 0 2px #fff,0 3px 10px rgba(255,61,110,.7);animation:batchBadgePop .3s cubic-bezier(.3,1.6,.5,1) both}
+@keyframes batchBadgePop{from{transform:scale(0)}to{transform:scale(1)}}
+/* 带斜切 / 裁切的小标题样式选中时，去掉裁切，保证光晕和徽章可见 */
+body.batchMode #output>h4.batchSelected{overflow:visible;clip-path:none}
+/* 图片选中：压暗 + 红色光晕（徽章由图片名称覆盖层绘制） */
+#output img.batchSelected{filter:brightness(.72) saturate(.9)}
+.imgNameBox.sel{background:rgba(255,61,110,.18)}
+.imgNameBox.sel::after{content:"✓";position:absolute;top:6px;right:6px;width:22px;height:22px;line-height:22px;border-radius:50%;
+ background:linear-gradient(135deg,#ff3d6e,#ff9a3d);color:#fff;font-size:13px;font-weight:700;text-align:center;
+ box-shadow:0 0 0 2px #fff,0 3px 10px rgba(255,61,110,.7);animation:batchBadgePop .3s cubic-bezier(.3,1.6,.5,1) both}
+</style>
 </head>
 
 
@@ -7492,7 +7701,7 @@ body.immersiveHidden #output>h4[data-sub],body.immersiveHidden #output>h4[data-s
                 </div>
                 <input type="file" id="addImgFileInput" accept="image/*" multiple style="display:none" />
                 <div class="imgUrlRow">
-                    <input type="text" id="addImgUrlInput" placeholder="或输入图片网址 https://..." />
+                    <textarea id="addImgUrlInput" rows="2" placeholder="或输入图片网址 https://...（可一次粘贴多个，换行分隔；Enter 加入，Shift+Enter 换行）"></textarea>
                     <button class="panelBtn" id="addImgUrlBtn">加入预览</button>
                 </div>
                 <div class="imgPreviewHeader">
@@ -7628,17 +7837,20 @@ body.immersiveHidden #output>h4[data-sub],body.immersiveHidden #output>h4[data-s
             <div id="editImageWrap" style="display:none;">
                 <div class="dropZone" id="editImgDropZone">
                     <span class="dropZoneIcon">📷</span>
-                    点击选择图片替换，或将图片拖拽到此处
+                    点击选择图片（支持多选），或将图片拖拽到此处
                     <span class="dropZoneHint">也可以直接 Ctrl+V 粘贴剪贴板中的图片</span>
                 </div>
-                <input type="file" id="editImgFileInput" accept="image/*" style="display:none" />
+                <input type="file" id="editImgFileInput" accept="image/*" multiple style="display:none" />
                 <div class="imgUrlRow">
-                    <input type="text" id="editImgUrlInput" placeholder="或输入图片网址 https://..." />
-                    <button class="panelBtn" id="editImgUrlApplyBtn" type="button">预览</button>
+                    <textarea id="editImgUrlInput" rows="2" placeholder="或输入图片网址 https://...（可一次粘贴多个，换行分隔；Enter 加入，Shift+Enter 换行）"></textarea>
+                    <button class="panelBtn" id="editImgUrlApplyBtn" type="button">加入预览</button>
                 </div>
-                <div class="bgPreviewWrap" id="editImgPreviewWrap" style="display:none;">
-                    <img id="editImgPreviewImg" alt="预览" />
+                <div class="imgPreviewHeader" id="editImgPreviewHeader">
+                    <span>共 <span id="editImgCount">0</span> 张（第 1 张替换当前图片，其余插入到它后面）</span>
+                    <button class="panelBtn secondaryBtn" type="button" id="editImgClearBtn"
+                        style="margin-top:0;">清空</button>
                 </div>
+                <div class="imgPreviewGrid" id="editImgPreviewGrid"></div>
             </div>
             <button class="panelBtn" id="editSaveBtn" type="button" style="width:100%;margin-top:10px;">
                 ✅ 保存修改
@@ -7701,14 +7913,18 @@ body.immersiveHidden #output>h4[data-sub],body.immersiveHidden #output>h4[data-s
     <!-- 【新增】批量删除模式：底部操作条 -->
     <div class="batchModeBar" id="batchModeBar">
         <div class="batchModeInfo">
-            🗂️ 批量删除模式：点击 内容 / 大标题 / 小标题 / 图片 进行选择
-            （已选 <span id="batchSelectedCount">0</span> 项）
+            <div class="batchInfoTitle">
+                <div class="batchInfoIcon">🗑️</div>
+                批量删除模式
+                <div class="batchInfoCount">已选 <b id="batchSelectedCount">0</b> 项</div>
+            </div>
+            <div class="batchInfoHint">点击 内容 / 大标题 / 小标题 / 图片 进行选择</div>
         </div>
         <div class="batchModeBtns">
             <button class="panelBtn secondaryBtn" id="batchSelectAllBtn" type="button">全选</button>
             <button class="panelBtn secondaryBtn" id="batchClearSelBtn" type="button">清空选择</button>
             <button class="panelBtn batchDeleteBtn" id="batchDeleteConfirmBtn" type="button">
-                🗑️ 删除选中(<span id="batchDeleteBtnCount">0</span>)
+                🗑️ 删除选中 <b id="batchDeleteBtnCount">0</b>
             </button>
             <button class="panelBtn secondaryBtn" id="batchExitBtn" type="button">退出批量模式</button>
         </div>
@@ -7845,6 +8061,127 @@ body.immersiveHidden #output>h4[data-sub],body.immersiveHidden #output>h4[data-s
     new MutationObserver(function () { if (!raf) raf = requestAnimationFrame(apply); })
         .observe(out, { childList: true });
     apply();
+})();
+</script>
+<script>
+/* 图片名称覆盖层：给 #output 里每张图片在底部叠一条名称条，右侧有编辑图标，点击可改名。
+   覆盖层放在 .box1 内（跟随整体透明度 / 沉浸模式淡入淡出）；层本身 pointer-events:none，
+   只有编辑图标可点，不影响图片的点击、右键、批量选择。 */
+(function () {
+    var box1 = document.querySelector(".box1"), out = document.getElementById("output");
+    if (!box1 || !out) return;
+    var layer = document.createElement("div");
+    layer.id = "imgNameLayer";
+    box1.appendChild(layer);
+    var boxes = [], raf = 0;
+    var PENCIL = '<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.8 9.94l-3.75-3.75L3 17.25zm17.7-10.2a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>';
+
+    function getBox(i) {
+        var b = boxes[i];
+        if (!b) {
+            b = document.createElement("div");
+            b.className = "imgNameBox";
+            var bar = document.createElement("div");
+            bar.className = "imgNameBar";
+            var txt = document.createElement("div");
+            txt.className = "imgNameText";
+            var btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "imgNameBtn";
+            btn.title = "编辑名称";
+            btn.innerHTML = PENCIL;
+            bar.appendChild(txt);
+            bar.appendChild(btn);
+            b.appendChild(bar);
+            b._bar = bar; b._txt = txt;
+            btn.addEventListener("click", function (e) { e.stopPropagation(); startEdit(b); });
+            /* 鼠标移到名称条上时，图片同步保持"悬停放大"，避免图片缩回去、名称条还在放大 */
+            b.addEventListener("mouseenter", function () { b.classList.add("hov"); if (b._img) b._img.classList.add("imgHov"); });
+            b.addEventListener("mouseleave", function () {
+                if (b._img && !b._img.matches(":hover")) { b.classList.remove("hov"); b._img.classList.remove("imgHov"); }
+            });
+            layer.appendChild(b);
+            boxes[i] = b;
+        }
+        return b;
+    }
+
+    function update() {
+        raf = 0;
+        var imgs = out.querySelectorAll("img"), base = box1.getBoundingClientRect(), info = [], i;
+        for (i = 0; i < imgs.length; i++) {
+            var im = imgs[i], r = im.getBoundingClientRect();
+            info.push({ im: im, r: r, w: im.offsetWidth, h: im.offsetHeight, name: imgDisplayName(im) });
+        }
+        for (i = 0; i < info.length; i++) {
+            var d = info[i], b = getBox(i);
+            if (b._img && b._img !== d.im) { b._img.classList.remove("imgHov"); if (b._img._nb === b) b._img._nb = null; }
+            b._img = d.im;
+            if ((!d.name && !b._editing) || !d.w) { b.style.display = "none"; d.im._nb = null; continue; }
+            d.im._nb = b;
+            b.style.display = "block";
+            /* 用中心点 + 布局宽高定位，悬停放大(transform)时位置也不会偏 */
+            b.style.left = (d.r.left + d.r.width / 2 - base.left - d.w / 2) + "px";
+            b.style.top = (d.r.top + d.r.height / 2 - base.top - d.h / 2) + "px";
+            b.style.width = d.w + "px";
+            b.style.height = d.h + "px";
+            if (b._txt.textContent !== d.name) { b._txt.textContent = d.name; b._txt.title = d.name; }
+            b.classList.toggle("hov", d.im.matches(":hover") || b.matches(":hover"));
+            b.classList.toggle("sel", d.im.classList.contains("batchSelected"));
+        }
+        while (boxes.length > imgs.length) layer.removeChild(boxes.pop());
+    }
+    function schedule() { if (!raf) raf = requestAnimationFrame(update); }
+
+    /* ---- 改名 ---- */
+    function startEdit(b) {
+        var img = b._img;
+        if (!img || b._editing) return;
+        b._editing = true;
+        var input = document.createElement("input");
+        input.type = "text";
+        input.className = "imgNameInput";
+        input.value = imgDisplayName(img);
+        input.placeholder = "输入图片名称";
+        b._bar.appendChild(input);
+        b._bar.classList.add("editing");
+        input.focus();
+        input.select();
+        var done = false;
+        function finish(save) {
+            if (done) return;
+            done = true;
+            b._editing = false;
+            var val = input.value.trim();
+            if (input.parentNode) input.parentNode.removeChild(input);
+            b._bar.classList.remove("editing");
+            if (save && val !== imgDisplayName(img)) {
+                /* 名称存在 data-name 上（不改 src，避免大图重新解码闪一下），保存内容时会写回 src */
+                img.setAttribute("data-name", val);
+                if (window.persistOutputGlobal) window.persistOutputGlobal();
+                if (typeof showToastGlobal === "function") showToastGlobal("名称已修改 ✨");
+            }
+            schedule();
+        }
+        input.addEventListener("keydown", function (e) {
+            e.stopPropagation();
+            if (e.key === "Enter") { e.preventDefault(); finish(true); }
+            else if (e.key === "Escape") { e.preventDefault(); finish(false); }
+        });
+        input.addEventListener("blur", function () { finish(true); });
+        input.addEventListener("click", function (e) { e.stopPropagation(); });
+    }
+
+    new MutationObserver(schedule).observe(out, { childList: true, subtree: true, attributes: true, attributeFilter: ["src", "data-name", "class"] });
+    if ("ResizeObserver" in window) new ResizeObserver(schedule).observe(out);
+    window.addEventListener("resize", schedule);
+    out.addEventListener("load", schedule, true);
+    out.addEventListener("mouseover", function (e) { if (e.target.tagName === "IMG" && e.target._nb) e.target._nb.classList.add("hov"); });
+    out.addEventListener("mouseout", function (e) {
+        var nb = e.target.tagName === "IMG" && e.target._nb;
+        if (nb && !nb.contains(e.relatedTarget)) nb.classList.remove("hov");
+    });
+    schedule();
 })();
 </script>
 </body>
