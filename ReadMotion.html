@@ -7869,6 +7869,60 @@ html.fx-no-breath #h3List li.highlight::after {
     display: none !important;
 }
 </style>
+<style id="toolbarBeautify">
+/* ===== 顶部工具栏：浅色底 + 同色系柔和胶囊按钮（只改样式，高度 40px 和所有功能不变）=====
+   - 窗口够宽：图标 + 文字
+   - 窗口较窄（<=720px）：只显示图标，文字隐藏 */
+.topToolbar{
+  gap:8px;padding:0 14px;border:none;border-radius:0 0 14px 14px;
+  background:linear-gradient(180deg,#ffffff 0%,#f1effb 100%);
+  box-shadow:0 4px 14px rgba(40,30,110,.18),inset 0 -1px 0 rgba(99,102,241,.12);
+}
+/* 底部一条很淡的 靛蓝 → 紫 → 洋红 细线，收边用，不抢眼 */
+.topToolbar::after{content:"";position:absolute;left:18px;right:18px;bottom:0;height:2px;border-radius:2px;pointer-events:none;
+  background:linear-gradient(90deg,#6366f1,#8b5cf6 55%,#d946ef);opacity:.5}
+/* 胶囊按钮 */
+.topToolbar .toolbarBtn,.topToolbar #btnAdd.toolbarBtn,.topToolbar #btnBg.toolbarBtn,.topToolbar #btnOpacity.toolbarBtn,.topToolbar #btnBtn4.toolbarBtn,.topToolbar #btnClear.toolbarBtn{
+  display:inline-flex;align-items:center;justify-content:center;height:28px;min-width:0;padding:0 13px 0 11px;
+  font-size:13px;font-weight:600;letter-spacing:.4px;text-shadow:none;
+  border:1px solid transparent;border-radius:999px;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.85),0 2px 5px var(--tb-glow,rgba(99,102,241,.2));
+  transition:transform .15s ease,filter .15s ease,box-shadow .15s ease}
+.topToolbar #btnAdd.toolbarBtn{background:linear-gradient(180deg,#f1f2ff,#e0e4ff);color:#4338ca;border-color:rgba(99,102,241,.30);--tb-glow:rgba(99,102,241,.28)}
+.topToolbar #btnBg.toolbarBtn{background:linear-gradient(180deg,#f6efff,#e9ddff);color:#6d28d9;border-color:rgba(139,92,246,.30);--tb-glow:rgba(139,92,246,.28)}
+.topToolbar #btnOpacity.toolbarBtn{background:linear-gradient(180deg,#fbedff,#f2dcff);color:#a21caf;border-color:rgba(217,70,239,.28);--tb-glow:rgba(192,38,211,.26)}
+.topToolbar #btnBtn4.toolbarBtn{background:linear-gradient(180deg,#eef4ff,#dce8ff);color:#1d4ed8;border-color:rgba(59,130,246,.28);--tb-glow:rgba(59,130,246,.26)}
+.topToolbar #btnClear.toolbarBtn{background:linear-gradient(180deg,#fff1f4,#ffe0e7);color:#be123c;border-color:rgba(244,63,94,.28);--tb-glow:rgba(244,63,94,.26)}
+.topToolbar .toolbarBtn:hover,.topToolbar #btnAdd.toolbarBtn:hover,.topToolbar #btnBg.toolbarBtn:hover,.topToolbar #btnOpacity.toolbarBtn:hover,.topToolbar #btnBtn4.toolbarBtn:hover,.topToolbar #btnClear.toolbarBtn:hover{transform:translateY(-1px);filter:brightness(.97) saturate(1.1);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.9),0 5px 12px var(--tb-glow,rgba(99,102,241,.3))}
+.topToolbar .toolbarBtn:active,.topToolbar #btnAdd.toolbarBtn:active,.topToolbar #btnBg.toolbarBtn:active,.topToolbar #btnOpacity.toolbarBtn:active,.topToolbar #btnBtn4.toolbarBtn:active,.topToolbar #btnClear.toolbarBtn:active{transform:translateY(0) scale(.97);filter:brightness(.94);
+  box-shadow:inset 0 2px 4px rgba(40,30,110,.18)}
+/* 宽窗口：图标 + 文字一起显示（图标在文字左边） */
+.topToolbar .toolbarBtnIcon{display:inline;font-size:14px;line-height:1;margin-right:6px}
+.topToolbar .toolbarBtnText{display:inline;max-width:none;margin:0;opacity:1;overflow:visible;white-space:nowrap}
+/* 时间胶囊：靛蓝 → 紫 → 洋红渐变，白色等宽数字（每秒跳动时宽度不抖动）+ 绿色小圆点 + 下拉箭头；比左边的浅色按钮更突出 */
+.topToolbar .toolbarTime{
+  display:flex;align-items:center;gap:7px;height:28px;box-sizing:border-box;padding:0 12px 0 11px;border-radius:999px;
+  font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:.5px;color:#fff;text-shadow:0 1px 2px rgba(60,20,120,.35);
+  background:linear-gradient(135deg,#6d72f5 0%,#9061f9 55%,#d655ef 100%);border:1px solid rgba(255,255,255,.55);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.45),0 4px 12px rgba(124,58,237,.38);
+  transition:transform .15s ease,filter .15s ease,box-shadow .15s ease}
+.topToolbar .toolbarTime:hover{transform:translateY(-1px);filter:brightness(1.08);box-shadow:inset 0 1px 0 rgba(255,255,255,.5),0 7px 16px rgba(124,58,237,.46)}
+.topToolbar .toolbarTime:active{transform:translateY(0) scale(.97);filter:brightness(.96)}
+.topToolbar .toolbarTime::before{content:"";flex:none;width:6px;height:6px;border-radius:50%;background:#86efac;box-shadow:0 0 0 2px rgba(134,239,172,.3),0 0 6px rgba(134,239,172,.9)}
+.topToolbar .toolbarTime::after{content:"▾";flex:none;font-size:10px;color:rgba(255,255,255,.9)}
+/* 窄窗口：只显示图标，隐藏文字 */
+@media (max-width:720px){
+  .topToolbar .toolbarBtnIcon{font-size:15px;margin-right:0}
+  .topToolbar .toolbarBtnText{display:none}
+  .topToolbar .toolbarBtn,.topToolbar #btnAdd.toolbarBtn,.topToolbar #btnBg.toolbarBtn,.topToolbar #btnOpacity.toolbarBtn,.topToolbar #btnBtn4.toolbarBtn,.topToolbar #btnClear.toolbarBtn{min-width:34px;padding:0 9px}
+}
+/* 时区下拉菜单 */
+.timeDropdown{border-radius:14px;padding:7px}
+.timeDropdownHeader{padding:6px 10px 8px;font-size:12px;font-weight:700;letter-spacing:.6px;color:#7c6fd1}
+.timeDropdownItem{border-radius:10px}
+.timeDropdownItem.active{background:#4f46e5;color:#fff}
+</style>
 </head>
 
 
