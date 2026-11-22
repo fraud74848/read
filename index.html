@@ -4226,13 +4226,13 @@
                 // 确认后刷新页面，恢复到最初的"使用说明"状态
                 // ======================
                 (function initAutoBackup() {
-                    const CFG_KEY = "autoBackupCfg";   // { enabled, lastMonth, lastTime, target }
+                    const CFG_KEY = "autoBackupCfg";   // { enabled, lastMonth, lastTime, target, name }
                     const HANDLE_DB = "autoBackupDB", HANDLE_STORE = "handles", HANDLE_KEY = "file";
                     const canPick = typeof window.showSaveFilePicker === "function";
                     let running = false, gestureArmed = false;
 
                     function loadCfg() {
-                        const d = { enabled: true, lastMonth: "", lastTime: "", target: "" };
+                        const d = { enabled: true, lastMonth: "", lastTime: "", target: "", name: "" };
                         try { const raw = localStorage.getItem(CFG_KEY); return raw ? Object.assign(d, JSON.parse(raw)) : d; }
                         catch (e) { return d; }
                     }
@@ -4241,7 +4241,14 @@
                         const d = new Date();
                         return d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2);
                     }
-                    function baseName() { return (($("title").text() || "").trim() || "导出内容") + "-自动备份.json"; }
+                    function defaultBaseName() { return (($("title").text() || "").trim() || "导出内容") + "-自动备份.json"; }
+                    // 自定义文件名：去掉文件名里不允许的字符，没填或清理后为空则用默认名称；自动补上 .json 后缀
+                    function cleanName(raw) {
+                        let n = String(raw || "").replace(/[\\\/:*?"<>|\u0000-\u001f]/g, "").replace(/\s+/g, " ").trim();
+                        n = n.replace(/\.json$/i, "").replace(/[. ]+$/, "").trim();
+                        return n ? n.slice(0, 100) + ".json" : "";
+                    }
+                    function baseName() { return cleanName(loadCfg().name) || defaultBaseName(); }
 
                     // ---- 备份文件句柄存 IndexedDB（只有 Chrome / Edge 电脑版支持） ----
                     function openDB() {
@@ -4380,6 +4387,27 @@
                         if (c.enabled && !c.lastMonth) c.lastMonth = monthKey();
                         saveCfg(c);
                         showToast(c.enabled ? "已开启每月自动备份 💾" : "已关闭自动备份");
+                    });
+
+                    // 自定义备份文件名：输入即保存；下方实时显示最终文件名
+                    function refreshNamePreview() {
+                        $("#autoBackupName").attr("title", "实际文件名：" + baseName());
+                    }
+                    $("#autoBackupName").val(loadCfg().name || "");
+                    refreshNamePreview();
+                    $("#autoBackupName").on("input", function () {
+                        const c = loadCfg();
+                        c.name = this.value;
+                        saveCfg(c);
+                        refreshNamePreview();
+                    }).on("blur", function () {
+                        // 失去焦点时把输入框整理成实际会用的名称（去掉非法字符和 .json 后缀）
+                        const cleaned = cleanName(this.value).replace(/\.json$/i, "");
+                        if (this.value !== cleaned) {
+                            this.value = cleaned;
+                            const c = loadCfg(); c.name = cleaned; saveCfg(c);
+                            refreshNamePreview();
+                        }
                     });
 
                     $("#autoBackupPickBtn").on("click", async function () {
@@ -7753,6 +7781,10 @@ body.batchMode #output>h4.batchSelected{overflow:visible;clip-path:none}
 .fxList { display: flex; flex-direction: column; gap: 6px; }
 .fxItem { display: flex !important; align-items: center; gap: 8px; margin: 0 !important; font-size: 13px; color: #333; cursor: pointer; }
 .abStatus { margin: 8px 0 4px; font-size: 12px; line-height: 1.6; color: #5a7286; word-break: break-all; }
+.abTopRow { display: flex; align-items: center; gap: 10px; }
+.abTopRow .fxItem { flex: none; white-space: nowrap; }
+.abNameInput { flex: 1; min-width: 0; box-sizing: border-box; padding: 6px 10px; border: 1px solid #cdd3e0; border-radius: 8px; font-size: 13px; outline: none; background: #fff; color: #333; }
+.abNameInput:focus { border-color: #8b5cf6; box-shadow: 0 0 0 2px rgba(139, 92, 246, .18); }
 .fxItem input { width: 16px; height: 16px; flex: none; accent-color: #8b5cf6; }
 </style>
 <style id="panelHeaderFix">
@@ -8012,16 +8044,17 @@ html.fx-no-breath #h3List li.highlight::after {
                 </div>
             </div>
             <div class="settingRow">
-                <label>💾 自动备份（每月自动导出一份 JSON，下个月覆盖上一份）</label>
-                <div class="fxList">
-                    <label class="fxItem"><input type="checkbox" id="autoBackupEnable" checked /><span>开启每月自动备份</span></label>
+                <label>💾 自动备份</label>
+                <div class="abTopRow">
+                    <label class="fxItem"><input type="checkbox" id="autoBackupEnable" checked /><span>每月自动备份</span></label>
+                    <input type="text" id="autoBackupName" class="abNameInput" maxlength="80" placeholder="文件名（留空用默认）" autocomplete="off" spellcheck="false" />
                 </div>
                 <div class="abStatus" id="autoBackupStatus"></div>
                 <div class="panelBtnRow">
                     <button class="panelBtn secondaryBtn" id="autoBackupPickBtn" type="button">📁 选择备份文件</button>
                     <button class="panelBtn secondaryBtn" id="autoBackupNowBtn" type="button">⬇️ 立即备份</button>
                 </div>
-                <div class="mcHint" style="margin-top:6px;font-size:11px;line-height:1.5;color:#8a90a6;">需要在那一天（或之后）打开过本页面才会执行。电脑版 Chrome / Edge 选择备份文件后可自动覆盖同一个文件；其它浏览器会下载到默认下载文件夹（重名时自动加序号，不会覆盖）。</div>
+                <div class="mcHint" style="margin-top:6px;font-size:11px;line-height:1.5;color:#8a90a6;">需在当月打开过本页面才会执行；已选好备份文件时，文件名以所选文件为准。</div>
             </div>
             <button class="panelBtn" id="opacitySaveBtn" type="button" style="width:100%;">✅ 保存设置</button>
         </div>
