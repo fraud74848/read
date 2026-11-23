@@ -7923,6 +7923,83 @@ html.fx-no-breath #h3List li.highlight::after {
 .timeDropdownItem{border-radius:10px}
 .timeDropdownItem.active{background:#4f46e5;color:#fff}
 </style>
+<style id="settingTabStyles">
+.setTabs{display:flex;gap:6px;padding:10px 14px 0 14px;flex-wrap:wrap}
+.setTabBtn{border:none;cursor:pointer;padding:5px 12px;border-radius:16px;font-size:13px;background:#e9eef3;color:#333;transition:filter .15s ease}
+.setTabBtn:hover{filter:brightness(.96)}
+.setTabBtn.active{background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff}
+#opacityPanel .setTabPane{display:none}
+#opacityPanel .setTabPane.active{display:block}
+</style>
+<style id="ieHeaderTabStyles">
+/* 导入/导出面板：导入、导出 两个选项卡放在标题栏里（原标题文字已去掉） */
+.ieHeadTabs{display:flex;align-items:center;gap:8px}
+#importExportPanel .addPanelHeader .ieTabBtn{height:26px;padding:0 14px;border-radius:13px;font-size:13px;font-weight:600;
+ background:rgba(255,255,255,.26);color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.15);transition:background .15s ease,color .15s ease,transform .15s ease}
+#importExportPanel .addPanelHeader .ieTabBtn:hover{background:rgba(255,255,255,.4)}
+#importExportPanel .addPanelHeader .ieTabBtn.active{background:#fff;color:#6d4fe0;text-shadow:none;box-shadow:0 1px 4px rgba(0,0,0,.2)}
+</style>
+<style id="bgPanelFormStyles">
+/* ===== 背景设置面板：表单美化（只作用于 #bgPanel，不影响其他面板） ===== */
+/* 图片 / 视频 切换：分段控件 */
+#bgPanel .bgTypeTabs{gap:4px;margin:14px 16px 0;padding:4px;border-radius:12px;background:#eceffa;box-shadow:inset 0 1px 3px rgba(60,60,120,.12)}
+#bgPanel .bgTypeTabBtn{flex:1;height:30px;padding:0 10px;border-radius:9px;font-size:13px;font-weight:600;background:transparent;color:#5d6280;
+ transition:background .18s ease,color .18s ease,box-shadow .18s ease}
+#bgPanel .bgTypeTabBtn:hover{color:#4f46e5}
+#bgPanel .bgTypeTabBtn.active{background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;box-shadow:0 2px 8px rgba(99,102,241,.4)}
+/* 选择 / 拖拽区 */
+#bgPanel .dropZone{padding:26px 14px;border:2px dashed #b9a8f5;border-radius:14px;line-height:1.6;color:#5d6280;
+ background:linear-gradient(135deg,#f8f6ff,#fdf3fb)}
+#bgPanel .dropZone:hover{border-color:#8b5cf6;background:linear-gradient(135deg,#f1edff,#fbebf8)}
+#bgPanel .dropZone.dragover{border-style:solid;border-color:#6366f1;background:linear-gradient(135deg,#e6e8ff,#f3e6ff);color:#4338ca}
+#bgPanel .dropZoneIcon{width:46px;height:46px;margin:0 auto 8px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:23px;
+ background:#fff;box-shadow:0 3px 10px rgba(139,92,246,.25)}
+#bgPanel .dropZoneHint{margin-top:2px;color:#8a90a6}
+/* 网址输入 + 预览按钮 */
+#bgPanel .imgUrlRow{align-items:center;gap:8px;margin-top:12px}
+#bgPanel .imgUrlRow input[type="text"]{flex:1;min-width:0;height:36px;box-sizing:border-box;padding:0 12px;border:1px solid #d3d8ea;border-radius:10px;
+ background:#fff;color:#2b2b3a;font-size:13px;outline:none;transition:border-color .15s ease,box-shadow .15s ease}
+#bgPanel .imgUrlRow input[type="text"]::placeholder{color:#a3a9bd}
+#bgPanel .imgUrlRow input[type="text"]:focus{border-color:#8b5cf6;box-shadow:0 0 0 3px rgba(139,92,246,.18)}
+#bgPanel .imgUrlRow .panelBtn{flex:none;height:36px;margin-top:0;padding:0 16px;display:inline-flex;align-items:center;justify-content:center}
+/* 预览 */
+#bgPanel .bgPreviewWrap{margin-top:12px;padding:5px;border-radius:14px;background:#fff;border:1px solid #e1e5f2;box-shadow:0 2px 10px rgba(60,60,120,.1)}
+#bgPanel .bgPreviewWrap img,#bgPanel .bgPreviewWrap video{width:100%;height:150px;max-height:none;border-radius:10px;object-fit:cover;box-shadow:none;background:#e7e9f3}
+#bgPanel .bgVideoStatus{margin-top:8px;padding:0 2px;font-size:12px;line-height:1.5;color:#6b7390}
+#bgPanel .bgVideoStatus:empty{display:none}
+/* 底部操作按钮：恢复默认(次要) + 应用并保存(主要) */
+#bgPanel .panelBtnRow{gap:10px;margin-top:2px}
+#bgPanel .panelBtnRow .panelBtn{height:38px;margin:0;padding:0 14px;display:inline-flex;align-items:center;justify-content:center;font-size:13.5px}
+#bgPanel .panelBtnRow .secondaryBtn{flex:1;border:1px solid #d3d8ea;box-shadow:none}
+#bgPanel .panelBtnRow #bgApplyBtn{flex:1.6}
+</style>
+<style id="addImagePaneStyles">
+/* ===== 新增 → 图片 表单美化（只作用于该选项卡） ===== */
+/* 修复"已选择 0 张"被竖着排：全局 span{display:block} 导致数字单独占一行 */
+.imgPreviewHeader span span{display:inline;padding:0}
+#addPanel .addTabPane[data-tab="image"] .dropZone,#editPanel .dropZone{padding:22px 14px;border:2px dashed #b9a8f5;border-radius:14px;line-height:1.6;color:#5d6280;
+ background:linear-gradient(135deg,#f8f6ff,#fdf3fb)}
+#addPanel .addTabPane[data-tab="image"] .dropZone:hover,#editPanel .dropZone:hover{border-color:#8b5cf6;background:linear-gradient(135deg,#f1edff,#fbebf8)}
+#addPanel .addTabPane[data-tab="image"] .dropZone.dragover,#editPanel .dropZone.dragover{border-style:solid;border-color:#6366f1;background:linear-gradient(135deg,#e6e8ff,#f3e6ff);color:#4338ca}
+#addPanel .addTabPane[data-tab="image"] .dropZoneIcon,#editPanel .dropZoneIcon{width:42px;height:42px;margin:0 auto 6px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:21px;
+ background:#fff;box-shadow:0 3px 10px rgba(139,92,246,.25)}
+#addPanel .addTabPane[data-tab="image"] .dropZoneHint,#editPanel .dropZoneHint{margin-top:0;font-size:12px;color:#8a90a6}
+/* 网址输入 + 加入 */
+#addPanel .imgUrlRow,#editPanel .imgUrlRow{align-items:center;gap:8px;margin-top:10px}
+#addPanel .imgUrlRow textarea,#editPanel .imgUrlRow textarea{flex:1;min-width:0;min-height:36px;height:36px;box-sizing:border-box;padding:8px 12px;border:1px solid #d3d8ea;border-radius:10px;
+ background:#fff;color:#2b2b3a;font-size:13px;line-height:18px;resize:vertical;outline:none;transition:border-color .15s ease,box-shadow .15s ease}
+#addPanel .imgUrlRow textarea::placeholder,#editPanel .imgUrlRow textarea::placeholder{color:#a3a9bd}
+#addPanel .imgUrlRow textarea:focus,#editPanel .imgUrlRow textarea:focus{border-color:#8b5cf6;box-shadow:0 0 0 3px rgba(139,92,246,.18)}
+#addPanel .imgUrlRow .panelBtn,#editPanel .imgUrlRow .panelBtn{flex:none;height:36px;margin-top:0;padding:0 18px;display:inline-flex;align-items:center;justify-content:center;align-self:flex-start}
+/* 已选数量 + 清空 */
+#addPanel .imgPreviewHeader,#editPanel .imgPreviewHeader{margin-top:10px}
+#addPanel .imgPreviewHeader>span,#editPanel .imgPreviewHeader>span{font-size:12.5px;color:#6b7390;white-space:nowrap}
+#addPanel .imgPreviewHeader .panelBtn,#editPanel .imgPreviewHeader .panelBtn{height:28px;margin:0;padding:0 14px;font-size:12px;display:inline-flex;align-items:center;justify-content:center;border:1px solid #d3d8ea;box-shadow:none}
+/* 添加按钮 */
+#addPanel #confirmAddImagesBtn{height:38px;margin-top:10px;display:inline-flex;align-items:center;justify-content:center;font-size:14px}
+/* 导入面板：拖拽区与下方按钮之间留出间距 */
+#importExportPanel #ieDropZone + .panelBtn{margin-top:12px}
+</style>
 </head>
 
 
@@ -7981,18 +8058,18 @@ html.fx-no-breath #h3List li.highlight::after {
             <div class="addTabPane" data-tab="image">
                 <div class="dropZone" id="imgDropZone">
                     <span class="dropZoneIcon">📷</span>
-                    点击选择图片，或将图片拖拽到此处（支持多选）
-                    <span class="dropZoneHint">也可以直接 Ctrl+V 粘贴剪贴板中的图片</span>
+                    点击选择 / 拖拽 / Ctrl+V 粘贴图片
+                    <span class="dropZoneHint">支持多选</span>
                 </div>
                 <input type="file" id="addImgFileInput" accept="image/*" multiple style="display:none" />
                 <div class="imgUrlRow">
-                    <textarea id="addImgUrlInput" rows="2" placeholder="或输入图片网址 https://...（可一次粘贴多个，换行分隔；Enter 加入，Shift+Enter 换行）"></textarea>
-                    <button class="panelBtn" id="addImgUrlBtn">加入预览</button>
+                    <textarea id="addImgUrlInput" rows="1" placeholder="图片网址，多个用换行分隔"></textarea>
+                    <button class="panelBtn" id="addImgUrlBtn">加入</button>
                 </div>
                 <div class="imgPreviewHeader">
                     <span>已选择 <span id="imgPreviewCount">0</span> 张</span>
                     <button class="panelBtn secondaryBtn" type="button" id="clearImgPreviewBtn"
-                        style="margin-top:0;">清空预览</button>
+                        style="margin-top:0;">清空</button>
                 </div>
                 <div class="imgPreviewGrid" id="imgPreviewGrid"></div>
                 <button class="panelBtn" id="confirmAddImagesBtn" style="width:100%;margin-top:10px;">
@@ -8058,16 +8135,20 @@ html.fx-no-breath #h3List li.highlight::after {
     <!-- 【新增】导入/导出面板 -->
     <div class="addPanel" id="importExportPanel">
         <div class="addPanelHeader">
-            <h4>📤 导入 / 导出</h4>
+            <div class="ieHeadTabs">
+                <button class="ieTabBtn active" data-tab="import" type="button">📥 导入</button>
+                <button class="ieTabBtn" data-tab="export" type="button">📤 导出</button>
+            </div>
             <button class="addPanelClose" id="importExportPanelClose">×</button>
-        </div>
-        <div class="ieTabs">
-            <button class="ieTabBtn active" data-tab="import">📥 导入</button>
-            <button class="ieTabBtn" data-tab="export">📤 导出</button>
         </div>
         <div class="ieTabContent">
             <div class="ieTabPane active" data-tab="import">
                 <p class="ieHint">支持 .txt / .json / .csv 格式文件，选择后会自动识别格式并正确渲染。</p>
+                <div class="dropZone" id="ieDropZone">
+                    <span class="dropZoneIcon">📥</span>
+                    将 .txt / .json / .csv 文件拖拽到此处导入，或点击选择文件
+                    <span class="dropZoneHint">一次只导入一个文件；导入会替换当前内容</span>
+                </div>
                 <label for="txtFileInput" class="panelBtn">📂 选择文件导入</label>
             </div>
             <div class="ieTabPane" data-tab="export">
@@ -8088,19 +8169,25 @@ html.fx-no-breath #h3List li.highlight::after {
                 <button class="addPanelClose" id="opacityPanelClose">×</button>
             </div>
         </div>
+        <div class="setTabs" id="setTabs">
+            <button class="setTabBtn active" data-stab="ui" type="button">🪟 界面</button>
+            <button class="setTabBtn" data-stab="menu" type="button">🎨 菜单颜色</button>
+            <button class="setTabBtn" data-stab="fx" type="button">✨ 特效</button>
+            <button class="setTabBtn" data-stab="backup" type="button">💾 备份</button>
+        </div>
         <div class="addTabContent">
-            <div class="settingRow">
+            <div class="settingRow setTabPane active" data-stab="ui">
                 <label>整体透明度：<span id="opacityValueLabel">100%</span></label>
                 <input type="range" id="opacitySlider" min="20" max="100" value="100" />
             </div>
-            <div class="settingRow">
+            <div class="settingRow setTabPane active" data-stab="ui">
                 <label>无操作后自动隐藏顶部工具栏和左侧菜单（沉浸模式）</label>
                 <div class="hideTimeRow">
                     <input type="number" id="hideTimeInput" min="0" placeholder="0" />
                     <span>秒（0 = 不自动隐藏）</span>
                 </div>
             </div>
-            <div class="settingRow">
+            <div class="settingRow setTabPane" data-stab="menu">
                 <label>🎨 左侧菜单颜色（按序号设置，可选 4 种默认配色，或自定义 3 色渐变；后面的规则会覆盖前面的；未设置的保持原来的配色）</label>
                 <div id="menuColorList"></div>
                 <div class="panelBtnRow">
@@ -8108,7 +8195,7 @@ html.fx-no-breath #h3List li.highlight::after {
                     <button class="panelBtn secondaryBtn" id="menuColorClearBtn" type="button">恢复默认色</button>
                 </div>
             </div>
-            <div class="settingRow">
+            <div class="settingRow setTabPane" data-stab="fx">
                 <label>✨ 特效开关（勾选 = 开启，取消勾选可降低资源占用；修改后立即预览，点「保存设置」才会保留）</label>
                 <div class="fxList">
                     <label class="fxItem"><input type="checkbox" id="fxBottom" /><span>底部时间栏的毛玻璃模糊</span></label>
@@ -8122,7 +8209,7 @@ html.fx-no-breath #h3List li.highlight::after {
                     <label class="fxItem"><input type="checkbox" id="fxLoopBatch" checked /><span>批量模式的循环动效（边框流动、图标晃动、删除按钮脉冲、四周光晕）</span></label>
                 </div>
             </div>
-            <div class="settingRow">
+            <div class="settingRow setTabPane" data-stab="backup">
                 <label>💾 自动备份</label>
                 <div class="abTopRow">
                     <label class="fxItem"><input type="checkbox" id="autoBackupEnable" checked /><span>每月自动备份</span></label>
@@ -8608,6 +8695,52 @@ window.syncBgVideo();
 (function () {
     var top = document.getElementById("opacityPanelSave"), bottom = document.getElementById("opacitySaveBtn");
     if (top && bottom) top.addEventListener("click", function () { bottom.click(); });
+})();
+</script>
+<script>
+/* 设置面板选项卡：界面 / 菜单颜色 / 特效 / 备份（只控制显示，不影响设置的读取与保存） */
+(function () {
+    var panel = document.getElementById("opacityPanel");
+    if (!panel) return;
+    var btns = panel.querySelectorAll(".setTabBtn"), panes = panel.querySelectorAll(".setTabPane");
+    function show(t) {
+        Array.prototype.forEach.call(btns, function (b) { b.classList.toggle("active", b.getAttribute("data-stab") === t); });
+        Array.prototype.forEach.call(panes, function (p) { p.classList.toggle("active", p.getAttribute("data-stab") === t); });
+    }
+    Array.prototype.forEach.call(btns, function (b) {
+        b.addEventListener("click", function () { show(b.getAttribute("data-stab")); });
+    });
+})();
+</script>
+<script>
+/* 导入面板：拖拽上传。把拖进来的文件交给原有的 #txtFileInput 及其 change 处理逻辑，导入行为与点击选择完全一致 */
+(function () {
+    var zone = document.getElementById("ieDropZone"), input = document.getElementById("txtFileInput");
+    if (!zone || !input) return;
+    function tip(m) { if (typeof showToastGlobal === "function") showToastGlobal(m); }
+    zone.addEventListener("click", function () { input.click(); });
+    ["dragenter", "dragover"].forEach(function (n) {
+        zone.addEventListener(n, function (e) { e.preventDefault(); e.stopPropagation(); zone.classList.add("dragover"); });
+    });
+    zone.addEventListener("dragleave", function (e) { e.preventDefault(); e.stopPropagation(); zone.classList.remove("dragover"); });
+    zone.addEventListener("drop", function (e) {
+        e.preventDefault(); e.stopPropagation();
+        zone.classList.remove("dragover");
+        var files = e.dataTransfer && e.dataTransfer.files;
+        if (!files || !files.length) return;
+        var f = files[0];
+        if (!/\.(txt|json|csv)$/i.test(f.name || "")) { tip("❌ 仅支持 .txt / .json / .csv 文件"); return; }
+        try {
+            var dt = new DataTransfer();
+            dt.items.add(f);
+            input.files = dt.files;
+            input.dispatchEvent(new Event("change", { bubbles: true }));
+            if (files.length > 1) tip("一次只导入一个文件，已导入第一个 📂");
+        } catch (err) {
+            console.warn("拖拽导入失败:", err);
+            tip("当前浏览器不支持拖拽导入，请点击选择文件");
+        }
+    });
 })();
 </script>
 </body>
