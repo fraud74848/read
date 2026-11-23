@@ -14,6 +14,219 @@
     <link rel="stylesheet" href="renders.css" />
     <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
     <script src="renders.js"></script>
+    <style id="mouseRippleStyles">
+/* ===== 鼠标移动波纹（默认关闭，在 设置→特效 中开启） ===== */
+#mouse-ripple-container{position:fixed;left:0;top:0;width:100%;height:100%;pointer-events:none;overflow:hidden;z-index:1000000;contain:strict}
+.mouse-ripple{position:fixed;pointer-events:none;border-radius:50%;box-sizing:border-box;
+    background:radial-gradient(circle,rgba(255,255,255,.4) 0%,rgba(255,255,255,0) 70%);
+    border:1px solid rgba(255,255,255,.2);transform:translate(-50%,-50%) scale(0);opacity:0;will-change:transform,opacity}
+#opacityPanel .ripOpts{margin:8px 0 0 24px;padding:10px 12px;border-radius:10px;background:rgba(139,92,246,.06);border:1px solid rgba(139,92,246,.15);transition:opacity .2s}
+#opacityPanel .ripOpts.off{opacity:.45;pointer-events:none}
+#opacityPanel .ripRow{display:grid;grid-template-columns:112px 1fr 56px;align-items:center;gap:8px;margin-bottom:8px;font-size:12.5px;color:#444}
+#opacityPanel .ripRow span{display:block;padding:0;white-space:nowrap}
+#opacityPanel .ripRow b{font-weight:600;color:#6d4fe0;text-align:right;font-size:12px}
+#opacityPanel .ripRow input[type=range]{width:100%;accent-color:#8b5cf6;margin:0}
+#opacityPanel .ripModeRow{display:flex;gap:6px;margin-bottom:8px}
+#opacityPanel .ripPreset{flex:1;padding:7px 4px;border-radius:9px;border:1px solid rgba(139,92,246,.3);background:#fff;color:#5b3fd0;font-size:12.5px;font-weight:600;cursor:pointer;transition:all .15s}
+#opacityPanel .ripPreset:hover{background:rgba(139,92,246,.1)}
+#opacityPanel .ripPreset.active{background:linear-gradient(90deg,#8b5cf6,#ec4899);color:#fff;border-color:transparent}
+#opacityPanel .ripColorBox{margin:2px 0 10px;padding:10px 12px;border-radius:10px;background:#fff;border:1px solid rgba(139,92,246,.18)}
+#opacityPanel .ripColorHead{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;font-size:12.5px;color:#444}
+#opacityPanel .ripColorHead span{display:block;padding:0}
+#opacityPanel .ripColorHead b{font-weight:600;color:#6d4fe0;font-size:12px}
+#opacityPanel .ripSwatches{display:flex;flex-wrap:wrap;gap:10px}
+#opacityPanel .ripSwatch{position:relative;width:30px;height:30px;padding:0;border-radius:50%;border:2px solid #fff;cursor:pointer;
+    background:var(--c,#999);box-shadow:0 0 0 1px rgba(0,0,0,.18),0 2px 6px rgba(0,0,0,.15);transition:transform .15s,box-shadow .15s}
+#opacityPanel .ripSwatch:hover{transform:scale(1.12)}
+#opacityPanel .ripSwatch.active{transform:scale(1.12);box-shadow:0 0 0 2px #8b5cf6,0 0 12px rgba(139,92,246,.55)}
+#opacityPanel .ripSwatch.active::after{content:"✓";position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:#fff;text-shadow:0 0 3px rgba(0,0,0,.7)}
+#opacityPanel .ripSwatch[data-color="#ffffff"].active::after{color:#6d4fe0;text-shadow:none}
+#opacityPanel .ripSwatch[data-color="#ffef00"].active::after{color:#333;text-shadow:none}
+#opacityPanel .ripSwatch.sw-random{background:conic-gradient(#00f2fe 0 25%,#fb00ff 0 50%,#39ff14 0 75%,#ffef00 0 100%)}
+#opacityPanel .ripSwatch.sw-rainbow{background:conic-gradient(#ff0080,#ff8c00,#ffe600,#39ff14,#00f2fe,#7b2cff,#ff0080)}
+#opacityPanel .ripSwatch.sw-aurora{background:conic-gradient(#00f2fe,#3b82f6,#7b2cff,#fb00ff,#00f2fe)}
+#opacityPanel .ripSwatch.sw-fire{background:conic-gradient(#ff0000,#ff6a00,#ffd000,#ff6a00,#ff0000)}
+#opacityPanel .ripSwatch.sw-ocean{background:conic-gradient(#00c6ff,#0072ff,#00e5ff,#0040ff,#00c6ff)}
+#opacityPanel .ripSwatch.sw-sunset{background:conic-gradient(#ff512f,#f09819,#ff0080,#7b2cff,#ff512f)}
+#opacityPanel .ripSwatch.sw-sakura{background:conic-gradient(#ffb7d5,#ff69b4,#ffffff,#ff9ecb,#ffb7d5)}
+#opacityPanel .ripSwatch.sw-gold{background:conic-gradient(#fff1a8,#ffc300,#ff9100,#ffe066,#fff1a8)}
+#opacityPanel .ripSwatch.sw-matrix{background:conic-gradient(#003b00,#00ff41,#b6ffb6,#00ff41,#003b00)}
+#opacityPanel .ripSwatch.sw-ice{background:conic-gradient(#e0ffff,#7fdbff,#ffffff,#4facfe,#e0ffff)}
+#opacityPanel .ripSwatch.sw-candy{background:conic-gradient(#ff9a9e,#fad0c4,#a18cd1,#84fab0,#8fd3f4,#ff9a9e)}
+#opacityPanel .ripSwatch.sw-cyber{background:conic-gradient(#ff00ff,#00ffff,#ff00ff,#00ffff,#ff00ff)}
+#opacityPanel .ripSwatch.sw-cycle{background:conic-gradient(hsl(0,100%,60%),hsl(60,100%,60%),hsl(120,100%,60%),hsl(180,100%,60%),hsl(240,100%,60%),hsl(300,100%,60%),hsl(360,100%,60%));animation:ripSwSpin 3s linear infinite}
+#opacityPanel .ripSwatch.sw-custom{overflow:hidden;background:conic-gradient(#ff0000,#ffff00,#00ff00,#00ffff,#0000ff,#ff00ff,#ff0000)}
+#opacityPanel .ripSwatch.sw-custom input{position:absolute;inset:-6px;width:42px;height:42px;opacity:0;cursor:pointer;border:0;padding:0}
+#opacityPanel .ripSwatch.sw-custom::before{content:"+";position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:700;color:#fff;text-shadow:0 0 3px rgba(0,0,0,.8);pointer-events:none}
+#opacityPanel .ripSwatch.sw-custom.active::after{content:""}
+#opacityPanel .ripSwatch[data-color="gold"].active::after,#opacityPanel .ripSwatch[data-color="ice"].active::after,#opacityPanel .ripSwatch[data-color="sakura"].active::after,#opacityPanel .ripSwatch[data-color="candy"].active::after{color:#333;text-shadow:none}
+@keyframes ripSwSpin{to{filter:hue-rotate(360deg)}}
+#opacityPanel .ripHint{font-size:11px;line-height:1.5;color:#8a90a6;margin:-2px 0 8px}
+    </style>
+    <script id="mouseRippleScript">
+    (function () {
+        "use strict";
+        var NEON = ["#00f2fe", "#fb00ff", "#39ff14", "#ffef00"];
+        // 渐变色：用 conic-gradient 画成彩色圆环，每个波纹随机旋转起始角度
+        var GRADIENTS = {
+            rainbow: { stops: "#ff0080, #ff8c00, #ffe600, #39ff14, #00f2fe, #7b2cff, #ff0080", glow: "#fb00ff" },
+            aurora:  { stops: "#00f2fe, #3b82f6, #7b2cff, #fb00ff, #00f2fe", glow: "#7b2cff" },
+            fire:    { stops: "#ff0000, #ff6a00, #ffd000, #ff6a00, #ff0000", glow: "#ff4500" },
+            ocean:   { stops: "#00c6ff, #0072ff, #00e5ff, #0040ff, #00c6ff", glow: "#0072ff" },
+            sunset:  { stops: "#ff512f, #f09819, #ff0080, #7b2cff, #ff512f", glow: "#ff0080" },
+            sakura:  { stops: "#ffb7d5, #ff69b4, #ffffff, #ff9ecb, #ffb7d5", glow: "#ff69b4" },
+            gold:    { stops: "#fff1a8, #ffc300, #ff9100, #ffe066, #fff1a8", glow: "#ffc300" },
+            matrix:  { stops: "#003b00, #00ff41, #b6ffb6, #00ff41, #003b00", glow: "#00ff41" },
+            ice:     { stops: "#e0ffff, #7fdbff, #ffffff, #4facfe, #e0ffff", glow: "#7fdbff" },
+            candy:   { stops: "#ff9a9e, #fad0c4, #a18cd1, #84fab0, #8fd3f4, #ff9a9e", glow: "#a18cd1" },
+            cyber:   { stops: "#ff00ff, #00ffff, #ff00ff, #00ffff, #ff00ff", glow: "#ff00ff" }
+        };
+        var DEFAULTS = { duration: 1200, baseSize: 80, maxSize: 400, speed: 1.5, maxCount: 20, interval: 30, color: "random", glow: true };
+        // 快速模式：满血 = 效果最足；均衡 = 原版默认；低效 = 小、少、稀疏、无发光，最省资源
+        var PRESETS = {
+            full:     { duration: 1500, baseSize: 100, maxSize: 520, speed: 2,   maxCount: 40, interval: 16, color: "random", glow: true },
+            balanced: Object.assign({}, DEFAULTS),
+            low:      { duration: 800,  baseSize: 50,  maxSize: 200, speed: 0.8, maxCount: 8,  interval: 80, color: "random", glow: false }
+        };
+        var LIMITS = { duration: [400, 3000], baseSize: [20, 200], maxSize: [100, 600], speed: [0, 4], maxCount: [5, 40], interval: [16, 200] };
+        var cfg = Object.assign({}, DEFAULTS);
+        var enabled = false, bound = false;
+        var active = new Set();
+        var container = null, sweeper = null;
+        var lastX = 0, lastY = 0, lastT = 0, hasPos = false, cycleHue = 0;
+
+        function clampCfg(c) {
+            var out = Object.assign({}, cfg);
+            Object.keys(LIMITS).forEach(function (k) {
+                if (c && c[k] != null && isFinite(Number(c[k]))) {
+                    out[k] = Math.min(LIMITS[k][1], Math.max(LIMITS[k][0], Number(c[k])));
+                }
+            });
+            if (c && c.glow != null) out.glow = !!c.glow;
+            if (c && typeof c.color === "string" && (c.color === "random" || c.color === "cycle" || GRADIENTS[c.color] || /^#[0-9a-f]{6}$/i.test(c.color))) out.color = c.color;
+            if (out.maxSize < out.baseSize) out.maxSize = out.baseSize;
+            return out;
+        }
+
+        function getContainer() {
+            if (container && container.isConnected) return container;
+            container = document.getElementById("mouse-ripple-container");
+            if (!container) {
+                container = document.createElement("div");
+                container.id = "mouse-ripple-container";
+                (document.body || document.documentElement).appendChild(container);
+            }
+            return container;
+        }
+
+        // ---------- 清理 ----------
+        function removeRipple(el) {
+            active.delete(el);
+            if (el.__timer) { clearTimeout(el.__timer); el.__timer = 0; }
+            if (el.__anim) { try { el.__anim.cancel(); } catch (e) {} el.__anim = null; }
+            if (el.parentNode) el.parentNode.removeChild(el);
+        }
+        function clearAll() {
+            Array.from(active).forEach(removeRipple);
+            // 兜底：清掉容器里任何残留节点
+            if (container && container.isConnected) container.textContent = "";
+        }
+        // 兜底巡检：移除超时仍未结束的、以及不在登记表里的残留节点
+        function sweep() {
+            var now = performance.now();
+            active.forEach(function (el) { if (now - el.__born > cfg.duration + 500) removeRipple(el); });
+            if (container && container.isConnected && container.childElementCount > active.size) {
+                Array.from(container.children).forEach(function (el) { if (!active.has(el)) el.remove(); });
+            }
+        }
+
+        // ---------- 创建 ----------
+        function create(x, y, size) {
+            if (active.size >= cfg.maxCount) return;
+            var el = document.createElement("div");
+            el.className = "mouse-ripple";
+            var g = GRADIENTS[cfg.color], glowColor;
+            if (g) {
+                var ang = (Math.random() * 360) | 0;
+                el.style.border = "2px solid transparent";
+                el.style.background = "radial-gradient(circle, rgba(255,255,255,.22) 0%, rgba(255,255,255,0) 70%) padding-box, conic-gradient(from " + ang + "deg, " + g.stops + ") border-box";
+                glowColor = g.glow;
+            } else {
+                if (cfg.color === "cycle") { cycleHue = (cycleHue + 28) % 360; glowColor = "hsl(" + cycleHue + ",100%,60%)"; }
+                else glowColor = cfg.color === "random" ? NEON[(Math.random() * NEON.length) | 0] : cfg.color;
+                el.style.borderColor = glowColor;
+            }
+            if (cfg.glow) el.style.boxShadow = "0 0 15px " + glowColor;
+            el.style.left = x + "px";
+            el.style.top = y + "px";
+            el.style.width = size + "px";
+            el.style.height = size + "px";
+            getContainer().appendChild(el);
+            el.__born = performance.now();
+            active.add(el);
+            var done = function () { removeRipple(el); };
+            if (el.animate) {
+                el.__anim = el.animate(
+                    [
+                        { transform: "translate(-50%,-50%) scale(0) rotate(0deg)", opacity: 0.5 },
+                        { transform: "translate(-50%,-50%) scale(1) rotate(" + (g ? (Math.random() < 0.5 ? -120 : 120) : 0) + "deg)", opacity: 0 }
+                    ],
+                    { duration: cfg.duration, easing: "cubic-bezier(0,0,0.2,1)", fill: "forwards" }
+                );
+                el.__anim.onfinish = done;
+                el.__anim.oncancel = done;
+            }
+            el.__timer = setTimeout(done, cfg.duration + 300);
+        }
+
+        function onMove(e) {
+            if (!enabled) return;
+            var now = performance.now();
+            if (!hasPos) { lastX = e.clientX; lastY = e.clientY; lastT = now; hasPos = true; return; }
+            if (now - lastT < cfg.interval) return;
+            var dx = e.clientX - lastX, dy = e.clientY - lastY;
+            var dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist <= 5) return;
+            create(e.clientX, e.clientY, Math.min(cfg.maxSize, cfg.baseSize + dist * cfg.speed));
+            lastX = e.clientX; lastY = e.clientY; lastT = now;
+        }
+        function onHide() { if (document.hidden) { clearAll(); hasPos = false; } }
+        function onBlur() { clearAll(); hasPos = false; }
+
+        function setEnabled(on) {
+            on = !!on;
+            if (on === enabled) return;
+            enabled = on;
+            if (on) {
+                if (bound) return;
+                bound = true;
+                hasPos = false;
+                document.addEventListener("mousemove", onMove, { passive: true });
+                document.addEventListener("visibilitychange", onHide);
+                window.addEventListener("blur", onBlur);
+                sweeper = setInterval(sweep, 2000);
+            } else {
+                // 关闭：解绑事件、停掉巡检、立即清空所有波纹
+                document.removeEventListener("mousemove", onMove);
+                document.removeEventListener("visibilitychange", onHide);
+                window.removeEventListener("blur", onBlur);
+                if (sweeper) { clearInterval(sweeper); sweeper = null; }
+                bound = false;
+                clearAll();
+            }
+        }
+
+        window.MouseRipple = {
+            defaults: DEFAULTS,
+            presets: PRESETS,
+            setEnabled: setEnabled,
+            setConfig: function (c) { cfg = clampCfg(c); return cfg; },
+            getConfig: function () { return Object.assign({}, cfg); },
+            clear: clearAll,
+            count: function () { return active.size; }
+        };
+    })();
+    </script>
     <script>
         // ======================
         // 全局配置参数
@@ -418,7 +631,7 @@
         }
 
         function loadUiSettings() {
-            const defaults = { opacity: 100, hideTime: 0, menuColors: [], fx: { bottom: false, shine: false, breath: true, copy: false, flow: false, uiblur: true, video: true, loopContent: true, loopBatch: true } };
+            const defaults = { opacity: 100, hideTime: 0, menuColors: [], fx: { bottom: false, shine: false, breath: true, copy: false, flow: false, uiblur: true, video: true, loopContent: true, loopBatch: true, ripple: false } };
             try {
                 const raw = localStorage.getItem(UI_SETTINGS_KEY);
                 return raw ? Object.assign(defaults, JSON.parse(raw)) : defaults;
@@ -4059,8 +4272,8 @@
                     opacitySlider.on("input", function () { applyOpacityValue(Number(this.value)); });
 
                     // ---------- 特效开关 ----------
-                    const fxMap = { bottom: "#fxBottom", shine: "#fxShine", breath: "#fxBreath", copy: "#fxCopy", flow: "#fxFlow", uiblur: "#fxUiBlur", video: "#fxVideo", loopContent: "#fxLoopContent", loopBatch: "#fxLoopBatch" };
-                    let savedFx = Object.assign({ bottom: false, shine: false, breath: true, copy: false, flow: false, uiblur: true, video: true, loopContent: true, loopBatch: true }, savedSettings.fx || {});
+                    const fxMap = { bottom: "#fxBottom", shine: "#fxShine", breath: "#fxBreath", copy: "#fxCopy", flow: "#fxFlow", uiblur: "#fxUiBlur", video: "#fxVideo", loopContent: "#fxLoopContent", loopBatch: "#fxLoopBatch", ripple: "#fxRipple" };
+                    let savedFx = Object.assign({ bottom: false, shine: false, breath: true, copy: false, flow: false, uiblur: true, video: true, loopContent: true, loopBatch: true, ripple: false }, savedSettings.fx || {});
                     function applyFx(fx) {
                         const root = document.documentElement.classList;
                         root.toggle("fx-no-bottom", !fx.bottom);
@@ -4074,6 +4287,8 @@
                         window.FX_COPY = !!fx.copy;
                         window.FX_H4FLOW = !!fx.flow;
                         if (window.applySubHeadStyles) window.applySubHeadStyles();
+                        if (window.MouseRipple) window.MouseRipple.setEnabled(!!fx.ripple);
+                        $("#rippleOpts").toggleClass("off", !fx.ripple);
                     }
                     function readFxUI() {
                         const fx = {};
@@ -4088,9 +4303,58 @@
                     // 勾选时立即预览；未点「保存设置」就关闭面板会恢复
                     $(Object.keys(fxMap).map(function (k) { return fxMap[k]; }).join(",")).on("change", function () { applyFx(readFxUI()); });
 
+                    // ---------- 鼠标波纹参数 ----------
+                    const ripMap = { glow: "#ripGlow", duration: "#ripDuration", baseSize: "#ripBase", maxSize: "#ripMax", speed: "#ripSpeed", maxCount: "#ripCount", interval: "#ripInterval", color: "#ripColor" };
+                    const ripUnit = { duration: " ms", baseSize: " px", maxSize: " px", speed: "", maxCount: " 个", interval: " ms" };
+                    let savedRip = Object.assign({}, window.MouseRipple.defaults, savedSettings.rippleCfg || {});
+                    function readRipUI() {
+                        const c = {};
+                        Object.keys(ripMap).forEach(function (k) {
+                            if (k === "glow") { c[k] = $(ripMap[k]).prop("checked"); return; }
+                            const v = $(ripMap[k]).val(); c[k] = k === "color" ? v : Number(v);
+                        });
+                        return c;
+                    }
+                    function syncRipUI(c) {
+                        Object.keys(ripMap).forEach(function (k) {
+                            const el = $(ripMap[k]);
+                            if (k === "glow") { el.prop("checked", !!c[k]); return; }
+                            el.val(c[k]);
+                            if (k === "color") {
+                                let nm = "";
+                                let hit = false;
+                                $(".ripSwatch[data-color]").each(function () { const on = $(this).data("color") === c[k]; $(this).toggleClass("active", on); if (on) { nm = $(this).attr("title"); hit = true; } });
+                                const isHex = /^#[0-9a-f]{6}$/i.test(c[k]);
+                                $("#ripCustomSwatch").toggleClass("active", isHex && !hit);
+                                if (isHex) { $("#ripCustomPicker").val(c[k]); if (!hit) nm = "自定义 " + c[k]; }
+                                $("#ripColorName").text(nm || c[k]);
+                            }
+                            if (k !== "color") el.siblings("b").text(Number(c[k]) + ripUnit[k]);
+                        });
+                    }
+                    function markPreset(c) {
+                        let hit = "";
+                        Object.keys(window.MouseRipple.presets).forEach(function (n) {
+                            const pr = window.MouseRipple.presets[n];
+                            if (Object.keys(pr).every(function (k) { return k === "color" || pr[k] === c[k]; })) hit = n;
+                        });
+                        $(".ripPreset").each(function () { $(this).toggleClass("active", $(this).data("preset") === hit); });
+                        $("#ripPresetName").text(hit ? "" : "（自定义）");
+                    }
+                    function applyRip(c) { const r = window.MouseRipple.setConfig(c); syncRipUI(r); markPreset(r); }
+                    syncRipUI(savedRip);
+                    applyRip(savedRip);
+                    $(Object.keys(ripMap).map(function (k) { return ripMap[k]; }).join(",")).on("input change", function () { applyRip(readRipUI()); });
+                    $("#ripClearBtn").on("click", function () { window.MouseRipple.clear(); showToast("已清理波纹 🧹"); });
+                    $("#ripResetBtn").on("click", function () { applyRip(window.MouseRipple.defaults); });
+                    $(".ripSwatch[data-color]").on("click", function () { $("#ripColor").val($(this).data("color")).trigger("change"); });
+                    $("#ripCustomPicker").on("input change", function () { $("#ripColor").val($(this).val()).trigger("change"); });
+                    $(".ripPreset").on("click", function () { const pr = Object.assign({}, window.MouseRipple.presets[$(this).data("preset")]); pr.color = $("#ripColor").val(); applyRip(pr); });
+
                     function closeAndRevert() {
                         syncFxUI(savedFx);
                         applyFx(savedFx);
+                        applyRip(savedRip);
                         menuColors = savedMenuColors.slice();
                         renderColorRows(savedMenuColors);
                         applyMenuColors();
@@ -4119,7 +4383,8 @@
 
                         savedFx = readFxUI();
                         applyFx(savedFx);
-                        if (saveUiSettings({ opacity: opacityVal, hideTime: hideTimeVal, menuColors: savedMenuColors, fx: savedFx })) {
+                        savedRip = window.MouseRipple.getConfig();
+                        if (saveUiSettings({ opacity: opacityVal, hideTime: hideTimeVal, menuColors: savedMenuColors, fx: savedFx, rippleCfg: savedRip })) {
                             showToast("设置已保存 ✨");
                         }
                         opacityPanel.removeClass("open");
@@ -7923,6 +8188,83 @@ html.fx-no-breath #h3List li.highlight::after {
 .timeDropdownItem{border-radius:10px}
 .timeDropdownItem.active{background:#4f46e5;color:#fff}
 </style>
+<style id="settingTabStyles">
+.setTabs{display:flex;gap:6px;padding:10px 14px 0 14px;flex-wrap:wrap}
+.setTabBtn{border:none;cursor:pointer;padding:5px 12px;border-radius:16px;font-size:13px;background:#e9eef3;color:#333;transition:filter .15s ease}
+.setTabBtn:hover{filter:brightness(.96)}
+.setTabBtn.active{background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff}
+#opacityPanel .setTabPane{display:none}
+#opacityPanel .setTabPane.active{display:block}
+</style>
+<style id="ieHeaderTabStyles">
+/* 导入/导出面板：导入、导出 两个选项卡放在标题栏里（原标题文字已去掉） */
+.ieHeadTabs{display:flex;align-items:center;gap:8px}
+#importExportPanel .addPanelHeader .ieTabBtn{height:26px;padding:0 14px;border-radius:13px;font-size:13px;font-weight:600;
+ background:rgba(255,255,255,.26);color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.15);transition:background .15s ease,color .15s ease,transform .15s ease}
+#importExportPanel .addPanelHeader .ieTabBtn:hover{background:rgba(255,255,255,.4)}
+#importExportPanel .addPanelHeader .ieTabBtn.active{background:#fff;color:#6d4fe0;text-shadow:none;box-shadow:0 1px 4px rgba(0,0,0,.2)}
+</style>
+<style id="bgPanelFormStyles">
+/* ===== 背景设置面板：表单美化（只作用于 #bgPanel，不影响其他面板） ===== */
+/* 图片 / 视频 切换：分段控件 */
+#bgPanel .bgTypeTabs{gap:4px;margin:14px 16px 0;padding:4px;border-radius:12px;background:#eceffa;box-shadow:inset 0 1px 3px rgba(60,60,120,.12)}
+#bgPanel .bgTypeTabBtn{flex:1;height:30px;padding:0 10px;border-radius:9px;font-size:13px;font-weight:600;background:transparent;color:#5d6280;
+ transition:background .18s ease,color .18s ease,box-shadow .18s ease}
+#bgPanel .bgTypeTabBtn:hover{color:#4f46e5}
+#bgPanel .bgTypeTabBtn.active{background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;box-shadow:0 2px 8px rgba(99,102,241,.4)}
+/* 选择 / 拖拽区 */
+#bgPanel .dropZone{padding:26px 14px;border:2px dashed #b9a8f5;border-radius:14px;line-height:1.6;color:#5d6280;
+ background:linear-gradient(135deg,#f8f6ff,#fdf3fb)}
+#bgPanel .dropZone:hover{border-color:#8b5cf6;background:linear-gradient(135deg,#f1edff,#fbebf8)}
+#bgPanel .dropZone.dragover{border-style:solid;border-color:#6366f1;background:linear-gradient(135deg,#e6e8ff,#f3e6ff);color:#4338ca}
+#bgPanel .dropZoneIcon{width:46px;height:46px;margin:0 auto 8px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:23px;
+ background:#fff;box-shadow:0 3px 10px rgba(139,92,246,.25)}
+#bgPanel .dropZoneHint{margin-top:2px;color:#8a90a6}
+/* 网址输入 + 预览按钮 */
+#bgPanel .imgUrlRow{align-items:center;gap:8px;margin-top:12px}
+#bgPanel .imgUrlRow input[type="text"]{flex:1;min-width:0;height:36px;box-sizing:border-box;padding:0 12px;border:1px solid #d3d8ea;border-radius:10px;
+ background:#fff;color:#2b2b3a;font-size:13px;outline:none;transition:border-color .15s ease,box-shadow .15s ease}
+#bgPanel .imgUrlRow input[type="text"]::placeholder{color:#a3a9bd}
+#bgPanel .imgUrlRow input[type="text"]:focus{border-color:#8b5cf6;box-shadow:0 0 0 3px rgba(139,92,246,.18)}
+#bgPanel .imgUrlRow .panelBtn{flex:none;height:36px;margin-top:0;padding:0 16px;display:inline-flex;align-items:center;justify-content:center}
+/* 预览 */
+#bgPanel .bgPreviewWrap{margin-top:12px;padding:5px;border-radius:14px;background:#fff;border:1px solid #e1e5f2;box-shadow:0 2px 10px rgba(60,60,120,.1)}
+#bgPanel .bgPreviewWrap img,#bgPanel .bgPreviewWrap video{width:100%;height:150px;max-height:none;border-radius:10px;object-fit:cover;box-shadow:none;background:#e7e9f3}
+#bgPanel .bgVideoStatus{margin-top:8px;padding:0 2px;font-size:12px;line-height:1.5;color:#6b7390}
+#bgPanel .bgVideoStatus:empty{display:none}
+/* 底部操作按钮：恢复默认(次要) + 应用并保存(主要) */
+#bgPanel .panelBtnRow{gap:10px;margin-top:2px}
+#bgPanel .panelBtnRow .panelBtn{height:38px;margin:0;padding:0 14px;display:inline-flex;align-items:center;justify-content:center;font-size:13.5px}
+#bgPanel .panelBtnRow .secondaryBtn{flex:1;border:1px solid #d3d8ea;box-shadow:none}
+#bgPanel .panelBtnRow #bgApplyBtn{flex:1.6}
+</style>
+<style id="addImagePaneStyles">
+/* ===== 新增 → 图片 表单美化（只作用于该选项卡） ===== */
+/* 修复"已选择 0 张"被竖着排：全局 span{display:block} 导致数字单独占一行 */
+.imgPreviewHeader span span{display:inline;padding:0}
+#addPanel .addTabPane[data-tab="image"] .dropZone,#editPanel .dropZone{padding:22px 14px;border:2px dashed #b9a8f5;border-radius:14px;line-height:1.6;color:#5d6280;
+ background:linear-gradient(135deg,#f8f6ff,#fdf3fb)}
+#addPanel .addTabPane[data-tab="image"] .dropZone:hover,#editPanel .dropZone:hover{border-color:#8b5cf6;background:linear-gradient(135deg,#f1edff,#fbebf8)}
+#addPanel .addTabPane[data-tab="image"] .dropZone.dragover,#editPanel .dropZone.dragover{border-style:solid;border-color:#6366f1;background:linear-gradient(135deg,#e6e8ff,#f3e6ff);color:#4338ca}
+#addPanel .addTabPane[data-tab="image"] .dropZoneIcon,#editPanel .dropZoneIcon{width:42px;height:42px;margin:0 auto 6px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:21px;
+ background:#fff;box-shadow:0 3px 10px rgba(139,92,246,.25)}
+#addPanel .addTabPane[data-tab="image"] .dropZoneHint,#editPanel .dropZoneHint{margin-top:0;font-size:12px;color:#8a90a6}
+/* 网址输入 + 加入 */
+#addPanel .imgUrlRow,#editPanel .imgUrlRow{align-items:center;gap:8px;margin-top:10px}
+#addPanel .imgUrlRow textarea,#editPanel .imgUrlRow textarea{flex:1;min-width:0;min-height:36px;height:36px;box-sizing:border-box;padding:8px 12px;border:1px solid #d3d8ea;border-radius:10px;
+ background:#fff;color:#2b2b3a;font-size:13px;line-height:18px;resize:vertical;outline:none;transition:border-color .15s ease,box-shadow .15s ease}
+#addPanel .imgUrlRow textarea::placeholder,#editPanel .imgUrlRow textarea::placeholder{color:#a3a9bd}
+#addPanel .imgUrlRow textarea:focus,#editPanel .imgUrlRow textarea:focus{border-color:#8b5cf6;box-shadow:0 0 0 3px rgba(139,92,246,.18)}
+#addPanel .imgUrlRow .panelBtn,#editPanel .imgUrlRow .panelBtn{flex:none;height:36px;margin-top:0;padding:0 18px;display:inline-flex;align-items:center;justify-content:center;align-self:flex-start}
+/* 已选数量 + 清空 */
+#addPanel .imgPreviewHeader,#editPanel .imgPreviewHeader{margin-top:10px}
+#addPanel .imgPreviewHeader>span,#editPanel .imgPreviewHeader>span{font-size:12.5px;color:#6b7390;white-space:nowrap}
+#addPanel .imgPreviewHeader .panelBtn,#editPanel .imgPreviewHeader .panelBtn{height:28px;margin:0;padding:0 14px;font-size:12px;display:inline-flex;align-items:center;justify-content:center;border:1px solid #d3d8ea;box-shadow:none}
+/* 添加按钮 */
+#addPanel #confirmAddImagesBtn{height:38px;margin-top:10px;display:inline-flex;align-items:center;justify-content:center;font-size:14px}
+/* 导入面板：拖拽区与下方按钮之间留出间距 */
+#importExportPanel #ieDropZone + .panelBtn{margin-top:12px}
+</style>
 </head>
 
 
@@ -7981,18 +8323,18 @@ html.fx-no-breath #h3List li.highlight::after {
             <div class="addTabPane" data-tab="image">
                 <div class="dropZone" id="imgDropZone">
                     <span class="dropZoneIcon">📷</span>
-                    点击选择图片，或将图片拖拽到此处（支持多选）
-                    <span class="dropZoneHint">也可以直接 Ctrl+V 粘贴剪贴板中的图片</span>
+                    点击选择 / 拖拽 / Ctrl+V 粘贴图片
+                    <span class="dropZoneHint">支持多选</span>
                 </div>
                 <input type="file" id="addImgFileInput" accept="image/*" multiple style="display:none" />
                 <div class="imgUrlRow">
-                    <textarea id="addImgUrlInput" rows="2" placeholder="或输入图片网址 https://...（可一次粘贴多个，换行分隔；Enter 加入，Shift+Enter 换行）"></textarea>
-                    <button class="panelBtn" id="addImgUrlBtn">加入预览</button>
+                    <textarea id="addImgUrlInput" rows="1" placeholder="图片网址，多个用换行分隔"></textarea>
+                    <button class="panelBtn" id="addImgUrlBtn">加入</button>
                 </div>
                 <div class="imgPreviewHeader">
                     <span>已选择 <span id="imgPreviewCount">0</span> 张</span>
                     <button class="panelBtn secondaryBtn" type="button" id="clearImgPreviewBtn"
-                        style="margin-top:0;">清空预览</button>
+                        style="margin-top:0;">清空</button>
                 </div>
                 <div class="imgPreviewGrid" id="imgPreviewGrid"></div>
                 <button class="panelBtn" id="confirmAddImagesBtn" style="width:100%;margin-top:10px;">
@@ -8058,16 +8400,20 @@ html.fx-no-breath #h3List li.highlight::after {
     <!-- 【新增】导入/导出面板 -->
     <div class="addPanel" id="importExportPanel">
         <div class="addPanelHeader">
-            <h4>📤 导入 / 导出</h4>
+            <div class="ieHeadTabs">
+                <button class="ieTabBtn active" data-tab="import" type="button">📥 导入</button>
+                <button class="ieTabBtn" data-tab="export" type="button">📤 导出</button>
+            </div>
             <button class="addPanelClose" id="importExportPanelClose">×</button>
-        </div>
-        <div class="ieTabs">
-            <button class="ieTabBtn active" data-tab="import">📥 导入</button>
-            <button class="ieTabBtn" data-tab="export">📤 导出</button>
         </div>
         <div class="ieTabContent">
             <div class="ieTabPane active" data-tab="import">
                 <p class="ieHint">支持 .txt / .json / .csv 格式文件，选择后会自动识别格式并正确渲染。</p>
+                <div class="dropZone" id="ieDropZone">
+                    <span class="dropZoneIcon">📥</span>
+                    将 .txt / .json / .csv 文件拖拽到此处导入，或点击选择文件
+                    <span class="dropZoneHint">一次只导入一个文件；导入会替换当前内容</span>
+                </div>
                 <label for="txtFileInput" class="panelBtn">📂 选择文件导入</label>
             </div>
             <div class="ieTabPane" data-tab="export">
@@ -8088,19 +8434,25 @@ html.fx-no-breath #h3List li.highlight::after {
                 <button class="addPanelClose" id="opacityPanelClose">×</button>
             </div>
         </div>
+        <div class="setTabs" id="setTabs">
+            <button class="setTabBtn active" data-stab="ui" type="button">🪟 界面</button>
+            <button class="setTabBtn" data-stab="menu" type="button">🎨 菜单颜色</button>
+            <button class="setTabBtn" data-stab="fx" type="button">✨ 特效</button>
+            <button class="setTabBtn" data-stab="backup" type="button">💾 备份</button>
+        </div>
         <div class="addTabContent">
-            <div class="settingRow">
+            <div class="settingRow setTabPane active" data-stab="ui">
                 <label>整体透明度：<span id="opacityValueLabel">100%</span></label>
                 <input type="range" id="opacitySlider" min="20" max="100" value="100" />
             </div>
-            <div class="settingRow">
+            <div class="settingRow setTabPane active" data-stab="ui">
                 <label>无操作后自动隐藏顶部工具栏和左侧菜单（沉浸模式）</label>
                 <div class="hideTimeRow">
                     <input type="number" id="hideTimeInput" min="0" placeholder="0" />
                     <span>秒（0 = 不自动隐藏）</span>
                 </div>
             </div>
-            <div class="settingRow">
+            <div class="settingRow setTabPane" data-stab="menu">
                 <label>🎨 左侧菜单颜色（按序号设置，可选 4 种默认配色，或自定义 3 色渐变；后面的规则会覆盖前面的；未设置的保持原来的配色）</label>
                 <div id="menuColorList"></div>
                 <div class="panelBtnRow">
@@ -8108,7 +8460,7 @@ html.fx-no-breath #h3List li.highlight::after {
                     <button class="panelBtn secondaryBtn" id="menuColorClearBtn" type="button">恢复默认色</button>
                 </div>
             </div>
-            <div class="settingRow">
+            <div class="settingRow setTabPane" data-stab="fx">
                 <label>✨ 特效开关（勾选 = 开启，取消勾选可降低资源占用；修改后立即预览，点「保存设置」才会保留）</label>
                 <div class="fxList">
                     <label class="fxItem"><input type="checkbox" id="fxBottom" /><span>底部时间栏的毛玻璃模糊</span></label>
@@ -8120,9 +8472,59 @@ html.fx-no-breath #h3List li.highlight::after {
                     <label class="fxItem"><input type="checkbox" id="fxVideo" checked /><span>视频背景播放（取消勾选 = 暂停，只显示静止画面）</span></label>
                     <label class="fxItem"><input type="checkbox" id="fxLoopContent" checked /><span>内容区的循环光效（小标题流动光、高亮块脉冲）</span></label>
                     <label class="fxItem"><input type="checkbox" id="fxLoopBatch" checked /><span>批量模式的循环动效（边框流动、图标晃动、删除按钮脉冲、四周光晕）</span></label>
+                    <label class="fxItem"><input type="checkbox" id="fxRipple" /><span>鼠标移动时的波纹扩散（默认关闭）</span></label>
+                    <div class="ripOpts off" id="rippleOpts">
+                        <div class="ripModeRow">
+                            <button class="ripPreset" data-preset="full" type="button">🔥 满血</button>
+                            <button class="ripPreset" data-preset="balanced" type="button">⚖️ 均衡</button>
+                            <button class="ripPreset" data-preset="low" type="button">🍃 低效</button>
+                        </div>
+                        <div class="ripHint" style="margin-top:0">快速模式<span id="ripPresetName" style="display:inline;padding:0;color:#6d4fe0"></span>：满血效果最足、占用最高；均衡为默认；低效最省资源。下面可继续微调。</div>
+                        <div class="ripRow"><span>扩散时长（越短越快）</span><input type="range" id="ripDuration" min="400" max="3000" step="100" /><b></b></div>
+                        <div class="ripRow"><span>基础大小</span><input type="range" id="ripBase" min="20" max="200" step="5" /><b></b></div>
+                        <div class="ripRow"><span>最大大小</span><input type="range" id="ripMax" min="100" max="600" step="10" /><b></b></div>
+                        <div class="ripRow"><span>速度感应</span><input type="range" id="ripSpeed" min="0" max="4" step="0.1" /><b></b></div>
+                        <div class="ripRow"><span>同屏最大数量</span><input type="range" id="ripCount" min="5" max="40" step="1" /><b></b></div>
+                        <div class="ripRow"><span>生成间隔（越大越省）</span><input type="range" id="ripInterval" min="16" max="200" step="2" /><b></b></div>
+                        <label class="fxItem" style="margin-bottom:8px !important"><input type="checkbox" id="ripGlow" /><span style="padding:0;display:inline">发光效果（关闭更省资源）</span></label>
+                        <div class="ripColorBox">
+                            <div class="ripColorHead"><span>颜色</span><b id="ripColorName"></b></div>
+                            <div class="ripSwatches">
+                                <button type="button" class="ripSwatch sw-random" data-color="random" title="随机霓虹"></button>
+                                <button type="button" class="ripSwatch" data-color="#00f2fe" title="青色" style="--c:#00f2fe"></button>
+                                <button type="button" class="ripSwatch" data-color="#fb00ff" title="粉紫" style="--c:#fb00ff"></button>
+                                <button type="button" class="ripSwatch" data-color="#39ff14" title="荧光绿" style="--c:#39ff14"></button>
+                                <button type="button" class="ripSwatch" data-color="#ffef00" title="亮黄" style="--c:#ffef00"></button>
+                                <button type="button" class="ripSwatch" data-color="#ffffff" title="白色" style="--c:#ffffff"></button>
+                                <button type="button" class="ripSwatch sw-rainbow" data-color="rainbow" title="彩虹渐变"></button>
+                                <button type="button" class="ripSwatch sw-aurora" data-color="aurora" title="极光渐变"></button>
+                                <button type="button" class="ripSwatch sw-fire" data-color="fire" title="烈焰"></button>
+                                <button type="button" class="ripSwatch sw-ocean" data-color="ocean" title="深海"></button>
+                                <button type="button" class="ripSwatch sw-sunset" data-color="sunset" title="日落"></button>
+                                <button type="button" class="ripSwatch sw-sakura" data-color="sakura" title="樱花"></button>
+                                <button type="button" class="ripSwatch sw-gold" data-color="gold" title="鎏金"></button>
+                                <button type="button" class="ripSwatch sw-matrix" data-color="matrix" title="黑客绿"></button>
+                                <button type="button" class="ripSwatch sw-ice" data-color="ice" title="冰晶"></button>
+                                <button type="button" class="ripSwatch sw-candy" data-color="candy" title="糖果"></button>
+                                <button type="button" class="ripSwatch sw-cyber" data-color="cyber" title="赛博双色"></button>
+                                <button type="button" class="ripSwatch sw-cycle" data-color="cycle" title="色相流转（每个波纹依次换色）"></button>
+                                <button type="button" class="ripSwatch" data-color="#ff2d55" title="红" style="--c:#ff2d55"></button>
+                                <button type="button" class="ripSwatch" data-color="#ff7a00" title="橙" style="--c:#ff7a00"></button>
+                                <button type="button" class="ripSwatch" data-color="#3b82f6" title="蓝" style="--c:#3b82f6"></button>
+                                <button type="button" class="ripSwatch" data-color="#a855f7" title="紫" style="--c:#a855f7"></button>
+                                <span class="ripSwatch sw-custom" id="ripCustomSwatch" title="自定义颜色"><input type="color" id="ripCustomPicker" value="#ff4d4d" /></span>
+                            </div>
+                            <input type="hidden" id="ripColor" value="random" />
+                        </div>
+                        <div class="ripHint">速度感应：鼠标移动越快，圈越大（0 = 固定大小）。波纹结束后会自动移除；关闭开关、切换到其他窗口或标签页时会立即清空。</div>
+                        <div class="panelBtnRow">
+                            <button class="panelBtn secondaryBtn" id="ripClearBtn" type="button">🧹 立即清理波纹</button>
+                            <button class="panelBtn secondaryBtn" id="ripResetBtn" type="button">恢复默认参数</button>
+                        </div>
+                    </div>
                 </div>
             </div>
-            <div class="settingRow">
+            <div class="settingRow setTabPane" data-stab="backup">
                 <label>💾 自动备份</label>
                 <div class="abTopRow">
                     <label class="fxItem"><input type="checkbox" id="autoBackupEnable" checked /><span>每月自动备份</span></label>
@@ -8608,6 +9010,52 @@ window.syncBgVideo();
 (function () {
     var top = document.getElementById("opacityPanelSave"), bottom = document.getElementById("opacitySaveBtn");
     if (top && bottom) top.addEventListener("click", function () { bottom.click(); });
+})();
+</script>
+<script>
+/* 设置面板选项卡：界面 / 菜单颜色 / 特效 / 备份（只控制显示，不影响设置的读取与保存） */
+(function () {
+    var panel = document.getElementById("opacityPanel");
+    if (!panel) return;
+    var btns = panel.querySelectorAll(".setTabBtn"), panes = panel.querySelectorAll(".setTabPane");
+    function show(t) {
+        Array.prototype.forEach.call(btns, function (b) { b.classList.toggle("active", b.getAttribute("data-stab") === t); });
+        Array.prototype.forEach.call(panes, function (p) { p.classList.toggle("active", p.getAttribute("data-stab") === t); });
+    }
+    Array.prototype.forEach.call(btns, function (b) {
+        b.addEventListener("click", function () { show(b.getAttribute("data-stab")); });
+    });
+})();
+</script>
+<script>
+/* 导入面板：拖拽上传。把拖进来的文件交给原有的 #txtFileInput 及其 change 处理逻辑，导入行为与点击选择完全一致 */
+(function () {
+    var zone = document.getElementById("ieDropZone"), input = document.getElementById("txtFileInput");
+    if (!zone || !input) return;
+    function tip(m) { if (typeof showToastGlobal === "function") showToastGlobal(m); }
+    zone.addEventListener("click", function () { input.click(); });
+    ["dragenter", "dragover"].forEach(function (n) {
+        zone.addEventListener(n, function (e) { e.preventDefault(); e.stopPropagation(); zone.classList.add("dragover"); });
+    });
+    zone.addEventListener("dragleave", function (e) { e.preventDefault(); e.stopPropagation(); zone.classList.remove("dragover"); });
+    zone.addEventListener("drop", function (e) {
+        e.preventDefault(); e.stopPropagation();
+        zone.classList.remove("dragover");
+        var files = e.dataTransfer && e.dataTransfer.files;
+        if (!files || !files.length) return;
+        var f = files[0];
+        if (!/\.(txt|json|csv)$/i.test(f.name || "")) { tip("❌ 仅支持 .txt / .json / .csv 文件"); return; }
+        try {
+            var dt = new DataTransfer();
+            dt.items.add(f);
+            input.files = dt.files;
+            input.dispatchEvent(new Event("change", { bubbles: true }));
+            if (files.length > 1) tip("一次只导入一个文件，已导入第一个 📂");
+        } catch (err) {
+            console.warn("拖拽导入失败:", err);
+            tip("当前浏览器不支持拖拽导入，请点击选择文件");
+        }
+    });
 })();
 </script>
 </body>
