@@ -268,6 +268,32 @@
                 { id: "uk", name: "英国时间", tz: "Europe/London" },
                 { id: "usa", name: "美国时间", tz: "America/New_York" },
                 { id: "brazil", name: "巴西时间", tz: "America/Sao_Paulo" },
+                // ---- 以下为新增的国家/地区（追加在后面，原有 id 不变，已保存的选择不受影响） ----
+                { id: "india", name: "印度时间", tz: "Asia/Kolkata" },
+                { id: "mexico", name: "墨西哥时间", tz: "America/Mexico_City" },
+                { id: "japan", name: "日本时间", tz: "Asia/Tokyo" },
+                { id: "korea", name: "韩国时间", tz: "Asia/Seoul" },
+                { id: "singapore", name: "新加坡时间", tz: "Asia/Singapore" },
+                { id: "malaysia", name: "马来西亚时间", tz: "Asia/Kuala_Lumpur" },
+                { id: "vietnam", name: "越南时间", tz: "Asia/Ho_Chi_Minh" },
+                { id: "indonesia", name: "印尼时间", tz: "Asia/Jakarta" },
+                { id: "philippines", name: "菲律宾时间", tz: "Asia/Manila" },
+                { id: "hongkong", name: "香港时间", tz: "Asia/Hong_Kong" },
+                { id: "bangladesh", name: "孟加拉时间", tz: "Asia/Dhaka" },
+                { id: "uae", name: "阿联酋时间", tz: "Asia/Dubai" },
+                { id: "saudi", name: "沙特时间", tz: "Asia/Riyadh" },
+                { id: "russia", name: "俄罗斯时间", tz: "Europe/Moscow" },
+                { id: "germany", name: "德国时间", tz: "Europe/Berlin" },
+                { id: "spain", name: "西班牙时间", tz: "Europe/Madrid" },
+                { id: "italy", name: "意大利时间", tz: "Europe/Rome" },
+                { id: "egypt", name: "埃及时间", tz: "Africa/Cairo" },
+                { id: "nigeria", name: "尼日利亚时间", tz: "Africa/Lagos" },
+                { id: "southafrica", name: "南非时间", tz: "Africa/Johannesburg" },
+                { id: "usa_west", name: "美国西部时间", tz: "America/Los_Angeles" },
+                { id: "canada", name: "加拿大时间", tz: "America/Toronto" },
+                { id: "argentina", name: "阿根廷时间", tz: "America/Argentina/Buenos_Aires" },
+                { id: "australia", name: "澳大利亚时间", tz: "Australia/Sydney" },
+                { id: "newzealand", name: "新西兰时间", tz: "Pacific/Auckland" },
             ],
             // 默认显示的时区 id
             defaultToolbarTimeZoneId: "beijing",
@@ -481,7 +507,7 @@
                     lineHeight: "1.6",
                     color: "#2f3150",
                 })
-                .html('<div class="gcHead"><span class="gcLogo">📖</span><div><div class="gcHeadTitle">使用说明</div><div class="gcHeadSub">👋 欢迎使用～这里还没有任何内容。点击顶部工具栏 <b>“📤 导入/出”</b> 导入文件，或用 <b>“➕ 新增”</b> 手动添加，导入后这份说明会自动消失。</div></div></div><div class="gcGrid"><div class="gcItem"><div class="gcTop"><span class="gcIcon">➕</span><span class="gcTitle">新增</span></div><div class="gcDesc">添加大标题、小标题、内容或图片，可以多条一起加。</div></div><div class="gcItem"><div class="gcTop"><span class="gcIcon">🖼️</span><span class="gcTitle">背景</span></div><div class="gcDesc">设置自定义背景图片或视频，也可以一键恢复默认背景。</div></div><div class="gcItem"><div class="gcTop"><span class="gcIcon">⚙️</span><span class="gcTitle">设置</span></div><div class="gcDesc">调节界面透明度、沉浸模式（无操作自动隐藏工具栏和菜单）、左侧菜单颜色。<b>特效开关</b>可关掉毛玻璃、循环光效或暂停视频背景来减少卡顿，还能开启<b>每月自动备份</b>并自定义文件名。</div></div><div class="gcItem"><div class="gcTop"><span class="gcIcon">📤</span><span class="gcTitle">导入 / 导出</span></div><div class="gcDesc">导入 .txt / .json / .csv 文件，或把当前内容导出保存。</div></div><div class="gcItem"><div class="gcTop"><span class="gcIcon">📋</span><span class="gcTitle">复制</span></div><div class="gcDesc">点击内容文字即可复制。鼠标经过图片时，底部出现名称栏（点笔图标可改名），右上角出现复制按钮，点击复制图片。</div></div><div class="gcItem"><div class="gcTop"><span class="gcIcon">🔍</span><span class="gcTitle">查看图片</span></div><div class="gcDesc">点击图片放大查看；顶部的“复制”按钮和底部的复制图标会复制图片并自动关闭查看器。</div></div><div class="gcItem"><div class="gcTop"><span class="gcIcon">🖱️</span><span class="gcTitle">右键菜单</span></div><div class="gcDesc">在大标题、小标题、内容或图片上点右键，可以编辑、插入新内容、删除，或进入“批量删除”一次选中多项再删除。</div></div><div class="gcItem"><div class="gcTop"><span class="gcIcon">🕐</span><span class="gcTitle">时区切换</span></div><div class="gcDesc">点击顶部右侧的时间，在北京、泰国、巴基斯坦、土耳其、法国、英国、美国、巴西时间之间切换，默认北京时间。</div></div><div class="gcItem"><div class="gcTop"><span class="gcIcon">🍀</span><span class="gcTitle">隐藏工具栏</span></div><div class="gcDesc">点击左上角的🍀图标，随时隐藏或显示顶部工具栏。</div></div><div class="gcItem"><div class="gcTop"><span class="gcIcon">🧹</span><span class="gcTitle">清除</span></div><div class="gcDesc">清除本地保存的内容并刷新，恢复到这份说明。清除前建议先导出或备份。</div></div></div><div class="gcFoot">💾 内容会自动保存在浏览器本地，刷新页面也不会丢失。</div>');
+                .html('<div class="gcHead"><span class="gcLogo">📖</span><div><div class="gcHeadTitle">使用说明</div><div class="gcHeadSub">👋 欢迎使用～这里还没有任何内容。点击顶部工具栏 <b>“📤 导入/出”</b> 导入文件，或用 <b>“➕ 新增”</b> 手动添加，导入后这份说明会自动消失。</div></div></div><div class="gcGrid"><div class="gcItem"><div class="gcTop"><span class="gcIcon">➕</span><span class="gcTitle">新增</span></div><div class="gcDesc">添加大标题、小标题、内容或图片，可以多条一起加。</div></div><div class="gcItem"><div class="gcTop"><span class="gcIcon">🖼️</span><span class="gcTitle">背景</span></div><div class="gcDesc">设置自定义背景图片或视频，也可以一键恢复默认背景。</div></div><div class="gcItem"><div class="gcTop"><span class="gcIcon">⚙️</span><span class="gcTitle">设置</span></div><div class="gcDesc">调节界面透明度、沉浸模式（无操作自动隐藏工具栏和菜单）、左侧菜单颜色。<b>特效开关</b>可关掉毛玻璃、循环光效或暂停视频背景来减少卡顿；<b>标题</b>选项卡可分别设置 H3 / H4 / H5 的样式（多选时轮换）和动效（扫光、呼吸光等）；<b>时间</b>选项卡可设置底部时间栏显示几栏、每栏显示哪个国家的时间；还能开启<b>每月自动备份</b>并自定义文件名。</div></div><div class="gcItem"><div class="gcTop"><span class="gcIcon">📤</span><span class="gcTitle">导入 / 导出</span></div><div class="gcDesc">导入 .txt / .json / .csv 文件，或把当前内容导出保存。</div></div><div class="gcItem"><div class="gcTop"><span class="gcIcon">📋</span><span class="gcTitle">复制</span></div><div class="gcDesc">点击内容文字即可复制。鼠标经过图片时，底部出现名称栏（点笔图标可改名），右上角出现复制按钮，点击复制图片。</div></div><div class="gcItem"><div class="gcTop"><span class="gcIcon">🔍</span><span class="gcTitle">查看图片</span></div><div class="gcDesc">点击图片放大查看；顶部的“复制”按钮和底部的复制图标会复制图片并自动关闭查看器。</div></div><div class="gcItem"><div class="gcTop"><span class="gcIcon">🖱️</span><span class="gcTitle">右键菜单</span></div><div class="gcDesc">在大标题、小标题、内容或图片上点右键，可以编辑、插入新内容、删除，或进入“批量删除”一次选中多项再删除。</div></div><div class="gcItem"><div class="gcTop"><span class="gcIcon">🕐</span><span class="gcTitle">时区切换</span></div><div class="gcDesc">点击顶部右侧的时间，可在北京、印度、墨西哥、日本、土耳其、法国、德国、英国、美国、巴西、澳大利亚等 <b>30 多个国家和地区</b>的时间之间切换（列表可滚动），默认北京时间，选择会被记住。</div></div><div class="gcItem"><div class="gcTop"><span class="gcIcon">🍀</span><span class="gcTitle">隐藏工具栏</span></div><div class="gcDesc">点击左上角的🍀图标，随时隐藏或显示顶部工具栏。</div></div><div class="gcItem"><div class="gcTop"><span class="gcIcon">🧹</span><span class="gcTitle">清除</span></div><div class="gcDesc">清除本地保存的内容并刷新，恢复到这份说明。清除前建议先导出或备份。</div></div></div><div class="gcFoot">💾 内容会自动保存在浏览器本地，刷新页面也不会丢失。</div>');
 
             outputDiv.append(prompt);
         }
@@ -2901,19 +2927,194 @@
                 ).textContent = `${regionName}: ${hours}:${minutes}:${seconds}`;
             }
 
+            // ======================
+            // 底部时间栏：显示哪几栏、每栏显示哪个时区，可在「设置 → 🕐 时间」里修改
+            // 默认三栏沿用 CONFIG.timeZones 的固定时差；国家/地区选项用 IANA 时区（自动处理夏令时）
+            // ======================
+            const BT_LEGACY = CONFIG.timeZones.map((z) => ({ id: z.id, name: z.name, offset: z.offset }));
+            const BT_POOL = BT_LEGACY.concat(
+                CONFIG.toolbarTimeZones.map((z) => ({ id: z.id, name: z.name.replace(/时间$/, ""), tz: z.tz }))
+            );
+            const BT_DEFAULT = BT_LEGACY.map((z) => z.id);
+            const BT_FILL = BT_DEFAULT.concat(["beijing", "india"]); // 栏数增加时，新增栏的初始时区
+            const BT_MAX = 5;
+            let btSlots = BT_DEFAULT.slice();
+            const btFormatters = {};
+
+            function btFormat(tz) {
+                try {
+                    let f = btFormatters[tz];
+                    if (!f) {
+                        f = btFormatters[tz] = new Intl.DateTimeFormat("zh-CN", {
+                            timeZone: tz, hourCycle: "h23", hour: "2-digit", minute: "2-digit", second: "2-digit",
+                        });
+                    }
+                    return f.format(new Date());
+                } catch (e) {
+                    return "--:--:--";
+                }
+            }
+
+            function btUtcLabel(z) {
+                if (z.tz) {
+                    try {
+                        const part = new Intl.DateTimeFormat("en", { timeZone: z.tz, timeZoneName: "shortOffset" })
+                            .formatToParts(new Date()).find((x) => x.type === "timeZoneName");
+                        return part ? part.value.replace("GMT", "UTC") : "";
+                    } catch (e) { return ""; }
+                }
+                return "UTC" + (z.offset >= 0 ? "+" : "-") + Math.abs(z.offset);
+            }
+
+            function btNormalize(raw) {
+                let slots = raw && Array.isArray(raw.slots) ? raw.slots : null;
+                if (slots) slots = slots.filter((id) => BT_POOL.some((z) => z.id === id)).slice(0, BT_MAX);
+                if (!slots || !slots.length) slots = BT_DEFAULT.slice();
+                return { slots: slots };
+            }
+
             /**
              * 更新所有时区时间
              */
             function updateAllTimes() {
-                CONFIG.timeZones.forEach((zone) => {
-                    updateTimezoneTime(zone.id, zone.name, zone.offset);
+                btSlots.forEach((id, i) => {
+                    const z = BT_POOL.find((x) => x.id === id);
+                    const el = document.getElementById("time" + (i + 1));
+                    if (!z || !el) return;
+                    if (z.tz) el.textContent = `${z.name}: ${btFormat(z.tz)}`;
+                    else updateTimezoneTime("time" + (i + 1), z.name, z.offset);
                 });
             }
+
+            // 按当前配置重建底部时间栏的每一栏，并立即刷新时间
+            function btRender() {
+                const box = document.querySelector(".bottom");
+                if (!box) return;
+                box.innerHTML = btSlots.map((_, i) => `<div id="time${i + 1}"></div>`).join("");
+                updateAllTimes();
+            }
+
+            // ---------- 设置面板用的接口 ----------
+            function btShortTime(z) {
+                try {
+                    if (z.tz) return new Intl.DateTimeFormat("zh-CN", { timeZone: z.tz, hourCycle: "h23", hour: "2-digit", minute: "2-digit" }).format(new Date());
+                    const n = new Date(), t = new Date(n.getTime() + n.getTimezoneOffset() * 60000 + z.offset * 3600000);
+                    return String(t.getHours()).padStart(2, "0") + ":" + String(t.getMinutes()).padStart(2, "0");
+                } catch (e) { return ""; }
+            }
+            function btUpdateDd(dd) {
+                const z = BT_POOL.find((x) => x.id === dd.querySelector(".btSel").value);
+                if (!z) return;
+                dd.querySelector(".btDdName").textContent = z.name;
+                dd.querySelector(".btDdUtc").textContent = btUtcLabel(z);
+            }
+            function btCloseMenus(box) {
+                box.querySelectorAll(".btDd.open").forEach((d) => d.classList.remove("open", "up"));
+            }
+            function btOpenMenu(dd) {
+                const box = dd.closest("#btBox");
+                btCloseMenus(box);
+                const cur = dd.querySelector(".btSel").value, menu = dd.querySelector(".btMenu");
+                const item = (z) => `<div class="btItem${z.id === cur ? " on" : ""}" data-id="${z.id}"><em class="btItemName">${z.name}</em><em class="btItemTime">${btShortTime(z)}</em><em class="btItemUtc">${btUtcLabel(z)}</em></div>`;
+                menu.innerHTML = '<div class="btGroup">原默认（固定时差，不随夏令时变化）</div>' + BT_LEGACY.map(item).join("") +
+                    '<div class="btGroup">国家 / 地区（自动处理夏令时）</div>' + BT_POOL.filter((z) => z.tz).map(item).join("");
+                dd.classList.add("open");
+                // 下方空间不够、上方更宽裕时，向上展开
+                let sc = dd.parentElement;
+                while (sc && sc !== document.body) { const oy = getComputedStyle(sc).overflowY; if (oy === "auto" || oy === "scroll") break; sc = sc.parentElement; }
+                const hasSc = sc && sc !== document.body, r = dd.getBoundingClientRect();
+                const bottomLimit = Math.min(window.innerHeight, hasSc ? sc.getBoundingClientRect().bottom : window.innerHeight);
+                const topLimit = Math.max(0, hasSc ? sc.getBoundingClientRect().top : 0);
+                const below = bottomLimit - r.bottom - 8, above = r.top - topLimit - 8;
+                const up = below < 160 && above > below; // 默认向下；下方放不下一个像样的菜单、而上方更宽裕时才向上
+                if (up) dd.classList.add("up");
+                menu.style.maxHeight = Math.max(120, Math.min(250, (up ? above : below) - 6)) + "px";
+                const act = menu.querySelector(".btItem.on");
+                if (act) menu.scrollTop = Math.max(0, act.offsetTop - menu.clientHeight / 2 + act.offsetHeight / 2);
+            }
+            let btDocBound = false;
+            function btBuildUI(box) {
+                if (!box) return;
+                const opts = BT_POOL.map((z) => `<option value="${z.id}">${z.name}</option>`).join("");
+                let rows = "";
+                for (let i = 0; i < BT_MAX; i++) {
+                    rows += `<div class="btRow" data-i="${i}"><label>第 ${i + 1} 栏</label><div class="btDd"><select class="btSel">${opts}</select>` +
+                        '<button type="button" class="btDdBtn"><em class="btDdName"></em><em class="btDdUtc"></em><em class="btDdCaret">▾</em></button><div class="btMenu"></div></div></div>';
+                }
+                let btns = "";
+                for (let n = 1; n <= BT_MAX; n++) btns += `<button type="button" class="btCountBtn" data-n="${n}">${n} 栏</button>`;
+                box.innerHTML = '<div class="hdRowLabel">显示栏数</div><div class="btCount"><input type="hidden" class="btCountVal" value="3" />' + btns + "</div>" + rows;
+                box.onclick = function (e) {
+                    if (!e.target.closest) return;
+                    const it = e.target.closest(".btItem");
+                    if (it && box.contains(it)) {
+                        const dd = it.closest(".btDd"), sel = dd.querySelector(".btSel"), id = it.getAttribute("data-id");
+                        dd.classList.remove("open", "up");
+                        if (sel.value !== id) {
+                            sel.value = id;
+                            btUpdateDd(dd);
+                            sel.dispatchEvent(new Event("change", { bubbles: true }));
+                        }
+                        return;
+                    }
+                    const tg = e.target.closest(".btDdBtn");
+                    if (tg && box.contains(tg)) {
+                        const dd = tg.closest(".btDd");
+                        if (dd.classList.contains("open")) dd.classList.remove("open", "up");
+                        else btOpenMenu(dd);
+                        return;
+                    }
+                    const b = e.target.closest(".btCountBtn");
+                    if (!b || !box.contains(b)) return;
+                    const inp = box.querySelector(".btCountVal");
+                    if (inp.value === b.getAttribute("data-n")) return;
+                    inp.value = b.getAttribute("data-n");
+                    btRefreshState(box);
+                    inp.dispatchEvent(new Event("change", { bubbles: true }));
+                };
+                // 点菜单以外的地方 / 按 Esc：收起下拉
+                if (!btDocBound) {
+                    btDocBound = true;
+                    document.addEventListener("click", function (ev) {
+                        if (!ev.target.closest || !ev.target.closest(".btDd")) btCloseMenus(box);
+                    });
+                    document.addEventListener("keydown", function (ev) { if (ev.key === "Escape") btCloseMenus(box); });
+                }
+            }
+            function btRefreshState(box) {
+                const n = Number(box.querySelector(".btCountVal").value) || 3;
+                box.querySelectorAll(".btCountBtn").forEach((b) => b.classList.toggle("on", Number(b.getAttribute("data-n")) === n));
+                box.querySelectorAll(".btRow").forEach((r) => r.classList.toggle("off", Number(r.getAttribute("data-i")) >= n));
+            }
+            function btSyncUI(box, cfg) {
+                if (!box) return;
+                const c = btNormalize(cfg);
+                box.querySelector(".btCountVal").value = c.slots.length;
+                box.querySelectorAll(".btRow").forEach((r) => {
+                    const i = Number(r.getAttribute("data-i"));
+                    r.querySelector(".btSel").value = c.slots[i] || BT_FILL[i];
+                    btUpdateDd(r.querySelector(".btDd"));
+                });
+                btCloseMenus(box);
+                btRefreshState(box);
+            }
+            function btReadUI(box) {
+                const n = Number(box.querySelector(".btCountVal").value) || 3;
+                const slots = [];
+                box.querySelectorAll(".btRow").forEach((r) => {
+                    if (Number(r.getAttribute("data-i")) < n) slots.push(r.querySelector(".btSel").value);
+                });
+                return btNormalize({ slots: slots });
+            }
+            window.BottomTimes = {
+                normalize: btNormalize, buildUI: btBuildUI, syncUI: btSyncUI, readUI: btReadUI, refreshState: btRefreshState,
+                set: function (cfg) { btSlots = btNormalize(cfg).slots; btRender(); },
+            };
 
             // 启动时钟
             setInterval(function () { if (!document.hidden) updateAllTimes(); }, 1000);
             document.addEventListener("visibilitychange", function () { if (!document.hidden) updateAllTimes(); });
-            updateAllTimes();
+            btRender();
 
             // ======================
             // 【新增】顶部工具栏右侧：时间显示 + 点击弹窗选择国家时区
@@ -2999,6 +3200,13 @@
                         renderDropdownList();
                     }
                     $dropdown.toggleClass("open", willOpen);
+                    if (willOpen) {
+                        // 列表较长：把当前选中的时区滚动到可见位置
+                        const listEl = $list[0], act = $list.find(".active")[0];
+                        if (listEl && act) {
+                            listEl.scrollTop = Math.max(0, act.getBoundingClientRect().top - listEl.getBoundingClientRect().top + listEl.scrollTop - listEl.clientHeight / 2 + act.offsetHeight / 2);
+                        }
+                    }
                 });
 
                 // 点击下拉框中的某个国家/地区：切换当前显示时区，并记住选择
@@ -4371,12 +4579,31 @@
                         HS.set(d);
                     });
 
+                    // ---------- 底部时间栏（显示几栏 / 每栏的时区） ----------
+                    const BT = window.BottomTimes;
+                    const btBox = document.getElementById("btBox");
+                    BT.buildUI(btBox);
+                    let savedBottom = BT.normalize(savedSettings.bottomTimes);
+                    BT.syncUI(btBox, savedBottom);
+                    BT.set(savedBottom);
+                    $(btBox).on("change", "select, input", function () {
+                        BT.refreshState(btBox);
+                        BT.set(BT.readUI(btBox));
+                    });
+                    $("#btResetBtn").on("click", function () {
+                        const d = BT.normalize(null);
+                        BT.syncUI(btBox, d);
+                        BT.set(d);
+                    });
+
                     function closeAndRevert() {
                         syncFxUI(savedFx);
                         applyFx(savedFx);
                         applyRip(savedRip);
                         HS.syncUI(hdBox, savedHeads);
                         HS.set(savedHeads);
+                        BT.syncUI(btBox, savedBottom);
+                        BT.set(savedBottom);
                         menuColors = savedMenuColors.slice();
                         renderColorRows(savedMenuColors);
                         applyMenuColors();
@@ -4408,7 +4635,9 @@
                         savedRip = window.MouseRipple.getConfig();
                         savedHeads = HS.readUI(hdBox);
                         HS.set(savedHeads);
-                        if (saveUiSettings({ opacity: opacityVal, hideTime: hideTimeVal, menuColors: savedMenuColors, fx: savedFx, rippleCfg: savedRip, heads: savedHeads })) {
+                        savedBottom = BT.readUI(btBox);
+                        BT.set(savedBottom);
+                        if (saveUiSettings({ opacity: opacityVal, hideTime: hideTimeVal, menuColors: savedMenuColors, fx: savedFx, rippleCfg: savedRip, heads: savedHeads, bottomTimes: savedBottom })) {
                             showToast("设置已保存 ✨");
                         }
                         opacityPanel.removeClass("open");
@@ -6276,8 +6505,34 @@
             display: flex;
             flex-direction: column;
             gap: 2px;
-            max-height: 280px;
+            max-height: min(60vh, 360px);
             overflow-y: auto;
+        }
+
+        /* 时区列表的滚动条：只有 3px 宽的细线（像头发丝），平时淡淡的，鼠标移上去稍微加深 */
+        .timeDropdownList::-webkit-scrollbar {
+            width: 3px;
+        }
+
+        .timeDropdownList::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .timeDropdownList::-webkit-scrollbar-thumb {
+            background: rgba(124, 111, 209, 0.35);
+            border-radius: 3px;
+        }
+
+        .timeDropdownList:hover::-webkit-scrollbar-thumb {
+            background: rgba(124, 111, 209, 0.75);
+        }
+
+        /* 不支持 ::-webkit-scrollbar 的浏览器（如 Firefox）：用标准写法，最细只能到 thin */
+        @supports not selector(::-webkit-scrollbar) {
+            .timeDropdownList {
+                scrollbar-width: thin;
+                scrollbar-color: rgba(124, 111, 209, 0.5) transparent;
+            }
         }
 
         .timeDropdownItem {
@@ -8043,6 +8298,52 @@ body.immersiveHidden #output>[data-anim],body.immersiveHidden #output>[data-anim
 @media (max-width:420px){#opacityPanel .hdAnimGrid{grid-template-columns:repeat(2,1fr)}}
 #opacityPanel .hdGroup:disabled{opacity:.5;cursor:not-allowed}
 </style>
+<style id="bottomTimeSettings">
+/* [设置] 弹窗加宽（其余弹窗 新增 / 背景 / 导入导出 仍是原宽度）；小屏幕自动收窄到屏幕的 94% */
+#opacityPanel.addPanel{width:min(94vw,540px)}
+/* 设置面板 · 时间选项卡 */
+#opacityPanel .btCount{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 12px}
+#opacityPanel .btCountBtn{margin:0;padding:5px 13px;border:1px solid #d3d8ea;border-radius:999px;background:#fff;color:#46495e;font:inherit;font-size:12.5px;cursor:pointer;
+ transition:border-color .15s,background .15s,box-shadow .15s}
+#opacityPanel .btCountBtn:hover{border-color:#a78bfa;background:#faf8ff}
+#opacityPanel .btCountBtn.on{border-color:transparent;color:#fff;font-weight:600;background:linear-gradient(135deg,#6366f1,#8b5cf6 55%,#d946ef);box-shadow:0 3px 10px rgba(139,92,246,.4)}
+#opacityPanel .btRow{display:flex;align-items:center;gap:10px;margin:0 0 8px;transition:opacity .15s}
+#opacityPanel .btRow.off{display:none}
+#opacityPanel .btRow label{display:inline-block!important;flex:none;width:46px;margin:0!important;font-size:13px;color:#46495e}
+#opacityPanel .btSel{display:none}
+/* 自定义下拉：触发按钮 + 弹出菜单（原生 select 的弹层无法美化，这里自己画） */
+#opacityPanel .btDd{position:relative;flex:1;min-width:0}
+#opacityPanel .btDdBtn{display:flex;align-items:center;gap:8px;width:100%;margin:0;padding:7px 10px;border:1px solid #cdd3e0;border-radius:10px;background:#fff;color:#2a2750;
+ font:inherit;font-size:13px;line-height:1.2;text-align:left;cursor:pointer;transition:border-color .15s,box-shadow .15s,background .15s}
+#opacityPanel .btDdBtn:hover{border-color:#a78bfa;background:#faf8ff}
+#opacityPanel .btDd.open .btDdBtn{border-color:#8b5cf6;box-shadow:0 0 0 3px rgba(139,92,246,.18);background:#fff}
+#opacityPanel .btDdBtn em{font-style:normal;padding:0}
+#opacityPanel .btDdName{flex:1;min-width:0;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#opacityPanel .btDdUtc{flex:none;padding:2px 8px!important;border-radius:999px;background:#efeaff;color:#6d4fe0;font-size:11.5px;font-weight:600}
+#opacityPanel .btDdCaret{flex:none;font-size:11px;color:#8a90a6;transition:transform .18s}
+#opacityPanel .btDd.open .btDdCaret{transform:rotate(180deg)}
+#opacityPanel .btMenu{display:none;position:absolute;left:0;right:0;top:calc(100% + 6px);z-index:30;max-height:250px;overflow-y:auto;padding:5px;
+ border-radius:12px;background:rgba(255,255,255,.98);border:1px solid rgba(139,92,246,.2);box-shadow:0 12px 30px rgba(31,22,75,.28),0 2px 8px rgba(31,22,75,.12)}
+#opacityPanel .btDd.open .btMenu{display:block;animation:btMenuIn .14s ease-out}
+#opacityPanel .btDd.up .btMenu{top:auto;bottom:calc(100% + 6px)}
+@keyframes btMenuIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+#opacityPanel .btDd.up .btMenu{animation-name:btMenuInUp}
+@keyframes btMenuInUp{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+#opacityPanel .btGroup{padding:7px 9px 4px;font-size:11px;font-weight:700;letter-spacing:.4px;color:#9a8fd8}
+#opacityPanel .btGroup:first-child{padding-top:3px}
+#opacityPanel .btItem{display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:8px;font-size:13px;color:#333;cursor:pointer;white-space:nowrap;transition:background .1s,color .1s}
+#opacityPanel .btItem em{font-style:normal;padding:0}
+#opacityPanel .btItemName{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+#opacityPanel .btItemTime{flex:none;font-size:12px;font-variant-numeric:tabular-nums;opacity:.7}
+#opacityPanel .btItemUtc{flex:none;min-width:62px;text-align:right;font-size:11.5px;opacity:.6}
+#opacityPanel .btItem:hover{background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff}
+#opacityPanel .btItem.on{background:linear-gradient(135deg,#35b872,#1f8a53);color:#fff;font-weight:600}
+#opacityPanel .btItem.on .btItemName::after{content:" ✓"}
+#opacityPanel .btMenu::-webkit-scrollbar{width:3px}
+#opacityPanel .btMenu::-webkit-scrollbar-track{background:transparent}
+#opacityPanel .btMenu::-webkit-scrollbar-thumb{background:rgba(124,111,209,.4);border-radius:3px}
+@supports not selector(::-webkit-scrollbar){#opacityPanel .btMenu{scrollbar-width:thin;scrollbar-color:rgba(124,111,209,.5) transparent}}
+</style>
 <style id="offscreenPause">
 /* ===== 性能优化：内容区里滚出屏幕的块（含小标题 h4/h5、高亮块）暂停动画，进入屏幕再恢复 =====
    用 data-off 属性而不是 class，避免触发图片名称层对 class 变化的监听 */
@@ -8522,6 +8823,7 @@ html.fx-no-breath #h3List li.highlight::after {
             <button class="setTabBtn" data-stab="menu" type="button">🎨 菜单颜色</button>
             <button class="setTabBtn" data-stab="fx" type="button">✨ 特效</button>
             <button class="setTabBtn" data-stab="head" type="button">🏷️ 标题</button>
+            <button class="setTabBtn" data-stab="time" type="button">🕐 时间</button>
             <button class="setTabBtn" data-stab="backup" type="button">💾 备份</button>
         </div>
         <div class="addTabContent">
@@ -8613,6 +8915,14 @@ html.fx-no-breath #h3List li.highlight::after {
                 <div class="mcHint" style="margin:-4px 0 8px;font-size:11px;line-height:1.5;color:#8a90a6;">勾选多个样式时，按列出的顺序轮换，每连续 N 个标题换一种；只勾一种则全部使用该样式。「跟随样式自带」= 金橙斜切自带扫光、流光边框自带流动，其余无动效。</div>
                 <div class="panelBtnRow">
                     <button class="panelBtn secondaryBtn" id="hdResetBtn" type="button">恢复默认</button>
+                </div>
+            </div>
+            <div class="settingRow setTabPane" data-stab="time">
+                <label>🕐 底部时间栏（选择显示几栏，以及每一栏显示哪个国家 / 地区的时间；修改后立即预览，点「保存设置」才会保留）</label>
+                <div id="btBox"></div>
+                <div class="mcHint" style="margin:2px 0 8px;font-size:11px;line-height:1.5;color:#8a90a6;">默认三栏沿用原来的固定时差（欧洲固定为 UTC+2，不随夏令时变化）；选「国家 / 地区」里的时区会自动处理夏令时。顶部右侧的时间仍可单独点击切换。</div>
+                <div class="panelBtnRow">
+                    <button class="panelBtn secondaryBtn" id="btResetBtn" type="button">恢复默认</button>
                 </div>
             </div>
             <div class="settingRow setTabPane" data-stab="backup">
