@@ -631,7 +631,7 @@
         }
 
         function loadUiSettings() {
-            const defaults = { opacity: 100, hideTime: 0, menuColors: [], fx: { bottom: false, shine: false, breath: true, copy: false, flow: false, uiblur: true, video: true, loopContent: true, loopBatch: true, ripple: false } };
+            const defaults = { opacity: 100, hideTime: 0, menuColors: [], fx: { bottom: false, shine: false, breath: true, copy: false, uiblur: true, video: true, loopContent: true, loopBatch: true, ripple: false } };
             try {
                 const raw = localStorage.getItem(UI_SETTINGS_KEY);
                 return raw ? Object.assign(defaults, JSON.parse(raw)) : defaults;
@@ -4272,8 +4272,8 @@
                     opacitySlider.on("input", function () { applyOpacityValue(Number(this.value)); });
 
                     // ---------- 特效开关 ----------
-                    const fxMap = { bottom: "#fxBottom", shine: "#fxShine", breath: "#fxBreath", copy: "#fxCopy", flow: "#fxFlow", uiblur: "#fxUiBlur", video: "#fxVideo", loopContent: "#fxLoopContent", loopBatch: "#fxLoopBatch", ripple: "#fxRipple" };
-                    let savedFx = Object.assign({ bottom: false, shine: false, breath: true, copy: false, flow: false, uiblur: true, video: true, loopContent: true, loopBatch: true, ripple: false }, savedSettings.fx || {});
+                    const fxMap = { bottom: "#fxBottom", shine: "#fxShine", breath: "#fxBreath", copy: "#fxCopy", uiblur: "#fxUiBlur", video: "#fxVideo", loopContent: "#fxLoopContent", loopBatch: "#fxLoopBatch", ripple: "#fxRipple" };
+                    let savedFx = Object.assign({ bottom: false, shine: false, breath: true, copy: false, uiblur: true, video: true, loopContent: true, loopBatch: true, ripple: false }, savedSettings.fx || {});
                     function applyFx(fx) {
                         const root = document.documentElement.classList;
                         root.toggle("fx-no-bottom", !fx.bottom);
@@ -4285,8 +4285,6 @@
                         window.FX_VIDEO = !!fx.video;
                         if (window.syncBgVideo) window.syncBgVideo();
                         window.FX_COPY = !!fx.copy;
-                        window.FX_H4FLOW = !!fx.flow;
-                        if (window.applySubHeadStyles) window.applySubHeadStyles();
                         if (window.MouseRipple) window.MouseRipple.setEnabled(!!fx.ripple);
                         $("#rippleOpts").toggleClass("off", !fx.ripple);
                     }
@@ -4351,10 +4349,34 @@
                     $("#ripCustomPicker").on("input change", function () { $("#ripColor").val($(this).val()).trigger("change"); });
                     $(".ripPreset").on("click", function () { const pr = Object.assign({}, window.MouseRipple.presets[$(this).data("preset")]); pr.color = $("#ripColor").val(); applyRip(pr); });
 
+                    // ---------- 标题样式 / 动效（H3 / H4 / H5） ----------
+                    const HS = window.HeadStyles;
+                    const hdBox = document.getElementById("hdCards");
+                    HS.buildUI(hdBox);
+                    let savedHeads = HS.normalize(savedSettings.heads, savedSettings.fx);
+                    HS.syncUI(hdBox, savedHeads);
+                    HS.set(savedHeads);
+                    // 修改时立即预览；至少保留一种样式
+                    $(hdBox).on("change input", "input, select", function () {
+                        if (this.type === "checkbox" && !$(this).closest(".hdChips").find("input:checked").length) {
+                            $(this).prop("checked", true);
+                            showToast("至少保留一种样式");
+                        }
+                        HS.refreshState(hdBox);
+                        HS.set(HS.readUI(hdBox));
+                    });
+                    $("#hdResetBtn").on("click", function () {
+                        const d = HS.normalize(null, null);
+                        HS.syncUI(hdBox, d);
+                        HS.set(d);
+                    });
+
                     function closeAndRevert() {
                         syncFxUI(savedFx);
                         applyFx(savedFx);
                         applyRip(savedRip);
+                        HS.syncUI(hdBox, savedHeads);
+                        HS.set(savedHeads);
                         menuColors = savedMenuColors.slice();
                         renderColorRows(savedMenuColors);
                         applyMenuColors();
@@ -4384,7 +4406,9 @@
                         savedFx = readFxUI();
                         applyFx(savedFx);
                         savedRip = window.MouseRipple.getConfig();
-                        if (saveUiSettings({ opacity: opacityVal, hideTime: hideTimeVal, menuColors: savedMenuColors, fx: savedFx, rippleCfg: savedRip })) {
+                        savedHeads = HS.readUI(hdBox);
+                        HS.set(savedHeads);
+                        if (saveUiSettings({ opacity: opacityVal, hideTime: hideTimeVal, menuColors: savedMenuColors, fx: savedFx, rippleCfg: savedRip, heads: savedHeads })) {
                             showToast("设置已保存 ✨");
                         }
                         opacityPanel.removeClass("open");
@@ -7883,7 +7907,7 @@
         }
     </style>
 <style id="subHeadStyles">
-/* ===== 小标题美化：h4 / h5 每连续 3 个换一种样式（共 4 种循环，由底部脚本写入 data-sub） ===== */
+/* ===== 小标题美化：h4 / h5 每连续 3 个换一种样式（h5 共 2 种循环，由底部脚本写入 data-sub） ===== */
 #output>h4[data-sub],#output>h5[data-sub]{position:relative;font-weight:600;letter-spacing:.5px;transition:transform .2s ease,box-shadow .2s ease}
 #output>h4[data-sub]{padding:4px 14px;font-size:14px}
 #output>h5[data-sub]{padding:2px 12px;font-size:13px}
@@ -7901,20 +7925,13 @@
  background:linear-gradient(105deg,transparent 30%,rgba(255,255,255,.65) 50%,transparent 70%);animation:subShine 3.5s ease-in-out infinite}
 @keyframes subShine{0%,40%{transform:translateX(-120%)}100%{transform:translateX(120%)}}
 
-/* h5-A 薄荷胶囊 */
-#output>h5[data-sub="0"]{color:#033;border:0;border-radius:999px;background:linear-gradient(90deg,#00c9a7,#92fe9d);box-shadow:0 2px 6px rgba(0,201,167,.4)}
-#output>h5[data-sub="0"]::before{content:"●";margin-right:6px;font-size:9px;vertical-align:1px;color:#fff}
-/* h5-B 橙红丝带 */
-#output>h5[data-sub="1"]{color:#fff;border:0;border-radius:4px 14px 4px 14px;text-shadow:0 1px 2px rgba(0,0,0,.4);
+/* h5-A 橙红丝带 */
+#output>h5[data-sub="0"]{color:#fff;border:0;border-radius:4px 14px 4px 14px;text-shadow:0 1px 2px rgba(0,0,0,.4);
  background:linear-gradient(90deg,#ff512f,#f09819);box-shadow:0 2px 6px rgba(255,81,47,.4)}
-/* h5-C 蓝色科技虚线 */
-#output>h5[data-sub="2"]{color:#aad6ff;background:rgba(10,30,80,.6);border:1px dashed #5aa9ff;border-radius:6px;box-shadow:0 0 6px rgba(90,169,255,.5)}
-#output>h5[data-sub="2"]::before{content:"‹ ";opacity:.8}
-#output>h5[data-sub="2"]::after{content:" ›";opacity:.8}
-/* h5-D 紫粉渐变 */
-#output>h5[data-sub="3"]{color:#fff;border:0;border-radius:999px;text-shadow:0 1px 2px rgba(0,0,0,.35);
+/* h5-B 紫粉渐变 */
+#output>h5[data-sub="1"]{color:#fff;border:0;border-radius:999px;text-shadow:0 1px 2px rgba(0,0,0,.35);
  background:linear-gradient(135deg,#8e2de2,#f857a6);box-shadow:0 2px 8px rgba(142,45,226,.45)}
-#output>h5[data-sub="3"]::before{content:"✦ "}
+#output>h5[data-sub="1"]::before{content:"✦ "}
 
 /* 沉浸模式隐藏时暂停动画，省性能 */
 body.immersiveHidden #output>h4[data-sub],body.immersiveHidden #output>h4[data-sub]::before,body.immersiveHidden #output>h4[data-sub]::after{animation-play-state:paused}
@@ -7959,6 +7976,72 @@ body.batchMode .imgCopyBtn{display:none}
  border:1px solid rgba(255,255,255,.7);border-radius:10px;background:rgba(255,255,255,.2);color:#fff;
  font-size:12px;text-align:center;outline:none;pointer-events:auto}
 .imgNameBar.editing .imgNameText,.imgNameBar.editing .imgNameBtn{display:none}
+</style>
+<style id="headStyleSettings">
+/* ===== H3 大标题样式（经典金边 = 不写 data-sub 的原始样式；这里是另外 3 种，尺寸沿用原 h3，只换配色） ===== */
+/* h3-A 霓虹青蓝 */
+#output>h3[data-sub="1"]{color:#7df9ff;border-color:#00e5ff;text-shadow:0 0 8px rgba(0,229,255,.8);
+ background:linear-gradient(180deg,rgba(6,24,64,.78),rgba(2,8,28,.92));box-shadow:0 0 10px rgba(0,229,255,.55),inset 0 0 8px rgba(0,229,255,.25)}
+/* h3-B 紫金渐变 */
+#output>h3[data-sub="2"]{color:#ffe27a;border-color:#ffd24a;text-shadow:0 1px 3px rgba(0,0,0,.6);
+ background:linear-gradient(135deg,#4a1d96,#7c3aed 55%,#c026d3);box-shadow:0 3px 10px rgba(124,58,237,.55)}
+/* h3-C 翠绿森林 */
+#output>h3[data-sub="3"]{color:#eaffd0;border-color:#8be28b;text-shadow:0 1px 3px rgba(0,0,0,.55);
+ background:linear-gradient(180deg,rgba(14,90,52,.85),rgba(5,45,28,.94));box-shadow:0 3px 9px rgba(34,160,90,.5)}
+
+/* ===== 标题动效（由设置里的「标题」选项卡写入 data-anim；不写 = 跟随样式自带动效） ===== */
+@keyframes hdBreath{0%,100%{filter:brightness(1)}50%{filter:brightness(1.22) drop-shadow(0 0 5px rgba(255,255,255,.55))}}
+@keyframes hdHue{to{filter:hue-rotate(360deg)}}
+@keyframes hdFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-2px)}}
+/* 显式选择动效 = 替换样式自带的动效（金橙斜切自带的扫光、流光边框自带的流动） */
+#output>[data-anim]:not([data-anim="shine"])::after{animation-name:none!important}
+#output>[data-anim="none"]{animation-name:none!important}
+#output>[data-anim="breath"]{animation-name:hdBreath!important;animation-duration:2.6s!important;animation-timing-function:ease-in-out!important;animation-iteration-count:infinite!important}
+#output>[data-anim="hue"]{animation-name:hdHue!important;animation-duration:6s!important;animation-timing-function:linear!important;animation-iteration-count:infinite!important}
+#output>[data-anim="float"]{animation-name:hdFloat!important;animation-duration:2.4s!important;animation-timing-function:ease-in-out!important;animation-iteration-count:infinite!important}
+#output>[data-anim="shine"]{position:relative;overflow:hidden}
+#output>[data-anim="shine"]::after{content:"";position:absolute;inset:0;pointer-events:none;transform:translateX(-120%);
+ background:linear-gradient(105deg,transparent 30%,rgba(255,255,255,.65) 50%,transparent 70%);animation:subShine 3.5s ease-in-out infinite}
+/* 与「内容区循环光效」开关、沉浸模式联动：暂停 */
+html.fx-no-loopcontent #output>[data-anim],html.fx-no-loopcontent #output>[data-anim]::after,
+body.immersiveHidden #output>[data-anim],body.immersiveHidden #output>[data-anim]::after{animation-play-state:paused!important}
+
+/* ===== 设置面板 · 标题选项卡 ===== */
+#opacityPanel .hdCard{margin:0 0 12px;padding:10px 12px;border-radius:12px;background:#f6f4ff;border:1px solid rgba(139,92,246,.18)}
+#opacityPanel .hdCardTitle{margin:0 0 8px;font-size:13.5px;font-weight:700;color:#5b3fd0}
+#opacityPanel .hdRowLabel{margin:0 0 6px;font-size:12px;color:#8a90a6}
+#opacityPanel .hdChips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+#opacityPanel .hdChip{display:inline-flex!important;align-items:center;gap:6px;margin:0!important;padding:4px 10px 4px 8px;border-radius:999px;
+ background:#fff;border:1px solid #d3d8ea;font-size:12.5px;color:#333;cursor:pointer;transition:border-color .15s,box-shadow .15s}
+#opacityPanel .hdChip:has(input:checked){border-color:#8b5cf6;box-shadow:0 0 0 2px rgba(139,92,246,.18)}
+#opacityPanel .hdChip input{width:15px;height:15px;margin:0;flex:none;accent-color:#8b5cf6}
+#opacityPanel .hdChip input:disabled{cursor:not-allowed}
+#opacityPanel .hdChip em{font-style:normal}
+#opacityPanel .hdChip .hdSw{display:inline-block;width:22px;height:12px;border-radius:6px;border:1px solid rgba(0,0,0,.15);flex:none}
+#opacityPanel .hdOptRow{display:flex;align-items:center;gap:8px;margin:0 0 8px;font-size:13px;color:#46495e}
+#opacityPanel .hdOptRow:last-child{margin-bottom:0}
+#opacityPanel .hdOptRow label{display:inline!important;margin:0!important}
+#opacityPanel .hdGroup{width:60px;box-sizing:border-box;padding:4px 8px;border:1px solid #cdd3e0;border-radius:8px;font-size:13px;background:#fff;color:#333;outline:none}
+#opacityPanel .hdGroup:focus{border-color:#8b5cf6;box-shadow:0 0 0 2px rgba(139,92,246,.18)}
+/* 动效选择：按钮网格，悬停 / 选中时图标会演示对应的动效 */
+#opacityPanel .hdAnimGrid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+#opacityPanel .hdAnimBtn{display:flex;align-items:center;gap:7px;min-width:0;margin:0;padding:6px 8px;border:1px solid #d3d8ea;border-radius:10px;
+ background:#fff;color:#46495e;font:inherit;font-size:12.5px;line-height:1.2;text-align:left;cursor:pointer;
+ transition:border-color .15s,background .15s,box-shadow .15s,transform .15s}
+#opacityPanel .hdAnimBtn:hover{border-color:#a78bfa;background:#faf8ff;transform:translateY(-1px)}
+#opacityPanel .hdAnimBtn.on{border-color:transparent;color:#fff;font-weight:600;background:linear-gradient(135deg,#6366f1,#8b5cf6 55%,#d946ef);box-shadow:0 3px 10px rgba(139,92,246,.4)}
+#opacityPanel .hdAnimIc{position:relative;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;flex:none;overflow:hidden;
+ border-radius:7px;background:#efeaff;font-size:14px;font-style:normal;padding:0}
+#opacityPanel .hdAnimBtn.on .hdAnimIc{background:rgba(255,255,255,.26)}
+#opacityPanel .hdAnimNm{font-style:normal;padding:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#opacityPanel .hdAnimBtn:hover .hdAnimIc[data-v="breath"],#opacityPanel .hdAnimBtn.on .hdAnimIc[data-v="breath"]{animation:hdBreath 1.6s ease-in-out infinite}
+#opacityPanel .hdAnimBtn:hover .hdAnimIc[data-v="hue"],#opacityPanel .hdAnimBtn.on .hdAnimIc[data-v="hue"]{animation:hdHue 3s linear infinite}
+#opacityPanel .hdAnimBtn:hover .hdAnimIc[data-v="float"],#opacityPanel .hdAnimBtn.on .hdAnimIc[data-v="float"]{animation:hdFloat 1.6s ease-in-out infinite}
+#opacityPanel .hdAnimIc[data-v="shine"]::after{content:"";position:absolute;inset:0;pointer-events:none;transform:translateX(-120%);
+ background:linear-gradient(105deg,transparent 30%,rgba(255,255,255,.9) 50%,transparent 70%)}
+#opacityPanel .hdAnimBtn:hover .hdAnimIc[data-v="shine"]::after,#opacityPanel .hdAnimBtn.on .hdAnimIc[data-v="shine"]::after{animation:subShine 2s ease-in-out infinite}
+@media (max-width:420px){#opacityPanel .hdAnimGrid{grid-template-columns:repeat(2,1fr)}}
+#opacityPanel .hdGroup:disabled{opacity:.5;cursor:not-allowed}
 </style>
 <style id="offscreenPause">
 /* ===== 性能优化：内容区里滚出屏幕的块（含小标题 h4/h5、高亮块）暂停动画，进入屏幕再恢复 =====
@@ -8438,6 +8521,7 @@ html.fx-no-breath #h3List li.highlight::after {
             <button class="setTabBtn active" data-stab="ui" type="button">🪟 界面</button>
             <button class="setTabBtn" data-stab="menu" type="button">🎨 菜单颜色</button>
             <button class="setTabBtn" data-stab="fx" type="button">✨ 特效</button>
+            <button class="setTabBtn" data-stab="head" type="button">🏷️ 标题</button>
             <button class="setTabBtn" data-stab="backup" type="button">💾 备份</button>
         </div>
         <div class="addTabContent">
@@ -8466,7 +8550,6 @@ html.fx-no-breath #h3List li.highlight::after {
                     <label class="fxItem"><input type="checkbox" id="fxBottom" /><span>底部时间栏的毛玻璃模糊</span></label>
                     <label class="fxItem"><input type="checkbox" id="fxShine" /><span>左侧菜单的扫光</span></label>
                     <label class="fxItem"><input type="checkbox" id="fxBreath" checked /><span>左侧菜单选中按钮的呼吸灯</span></label>
-                    <label class="fxItem"><input type="checkbox" id="fxFlow" /><span>小标题(h4)使用「流光边框」样式（不勾选时全部用「金橙斜切」）</span></label>
                     <label class="fxItem"><input type="checkbox" id="fxCopy" /><span>点击复制时的动效（色彩波动、粒子、爱心）</span></label>
                     <label class="fxItem"><input type="checkbox" id="fxUiBlur" checked /><span>面板、弹窗、右键菜单、批量操作栏的毛玻璃模糊</span></label>
                     <label class="fxItem"><input type="checkbox" id="fxVideo" checked /><span>视频背景播放（取消勾选 = 暂停，只显示静止画面）</span></label>
@@ -8522,6 +8605,14 @@ html.fx-no-breath #h3List li.highlight::after {
                             <button class="panelBtn secondaryBtn" id="ripResetBtn" type="button">恢复默认参数</button>
                         </div>
                     </div>
+                </div>
+            </div>
+            <div class="settingRow setTabPane" data-stab="head">
+                <label>🏷️ 标题样式与动效（H3 / H4 / H5 分别设置；修改后立即预览，点「保存设置」才会保留）</label>
+                <div id="hdCards"></div>
+                <div class="mcHint" style="margin:-4px 0 8px;font-size:11px;line-height:1.5;color:#8a90a6;">勾选多个样式时，按列出的顺序轮换，每连续 N 个标题换一种；只勾一种则全部使用该样式。「跟随样式自带」= 金橙斜切自带扫光、流光边框自带流动，其余无动效。</div>
+                <div class="panelBtnRow">
+                    <button class="panelBtn secondaryBtn" id="hdResetBtn" type="button">恢复默认</button>
                 </div>
             </div>
             <div class="settingRow setTabPane" data-stab="backup">
@@ -8776,26 +8867,140 @@ document.addEventListener("play", function (e) {
 window.syncBgVideo();
 </script>
 <script>
-/* 小标题样式轮换：#output 里的 h4、h5 各自按出现顺序，每连续 3 个换一种样式（共 4 种循环）。
+/* 标题样式轮换（H3 / H4 / H5）：#output 里各级标题各自按出现顺序，每连续 N 个换一种样式，样式池与动效由设置里的「标题」选项卡决定。
+   样式写入 data-sub（没有 data-sub = 原始基础样式），动效写入 data-anim（没有 = 跟随样式自带）。
    导入 / 新增 / 插入 / 删除后内容变化会自动重新编号。 */
 (function () {
     var out = document.getElementById("output");
     if (!out) return;
-    var STYLES = 4, GROUP = 3, raf = 0, H4_STYLES_ALL = [1, 2];
-    function h4Styles() { return window.FX_H4FLOW ? H4_STYLES_ALL : [2]; }
+    var LEVELS = [{ k: "h3", title: "H3 大标题" }, { k: "h4", title: "H4 小标题" }, { k: "h5", title: "H5 小标题" }];
+    /* sub：写入 data-sub 的值（null = 不写，用原始基础样式）；sw：设置面板里的色块 */
+    var POOL = {
+        h3: [{ id: "base", name: "经典金边（原始）", sub: null, sw: "linear-gradient(180deg,#6b5a14,#2a2205)" },
+             { id: "neon", name: "霓虹青蓝", sub: "1", sw: "linear-gradient(180deg,#0a2a6a,#020a1e)" },
+             { id: "violet", name: "紫金渐变", sub: "2", sw: "linear-gradient(135deg,#4a1d96,#c026d3)" },
+             { id: "forest", name: "翠绿森林", sub: "3", sw: "linear-gradient(180deg,#0e5a34,#052d1c)" }],
+        h4: [{ id: "base", name: "淡蓝胶囊（原始）", sub: null, sw: "linear-gradient(#f1f8ff,#a4c7e6)" },
+             { id: "flow", name: "流光边框", sub: "1", sw: "linear-gradient(90deg,#ff00cc,#3333ff,#00ffcc)" },
+             { id: "gold", name: "金橙斜切", sub: "2", sw: "linear-gradient(90deg,#ffc300,#ff6a00)" }],
+        h5: [{ id: "base", name: "浅绿胶囊（原始）", sub: null, sw: "linear-gradient(#b2f7ce,#39bb6f)" },
+             { id: "orange", name: "橙红丝带", sub: "0", sw: "linear-gradient(90deg,#ff512f,#f09819)" },
+             { id: "purple", name: "紫粉渐变", sub: "1", sw: "linear-gradient(135deg,#8e2de2,#f857a6)" }]
+    };
+    var ANIMS = [["default", "跟随样式", "🔗", "跟随样式自带：金橙斜切带扫光、流光边框带流动，其余无动效"], ["none", "关闭", "🚫", "关闭所有动效"], ["shine", "扫光", "✨", "一道白光从左到右扫过"],
+                 ["breath", "呼吸光", "💗", "亮度与光晕缓慢起伏"], ["hue", "色彩流转", "🌈", "色相持续循环变化"], ["float", "轻浮动", "🎈", "上下轻轻漂浮"]];
+    var DEFAULTS = { h3: { styles: ["base"], group: 3, anim: "default" }, h4: { styles: ["gold"], group: 3, anim: "default" }, h5: { styles: ["orange"], group: 3, anim: "default" } };
+    var cfg = null, raf = 0;
+
+    /* 规范化：缺项补默认；旧版设置里 fx.flow = true 的用户，H4 沿用「流光边框 + 金橙斜切」轮换 */
+    function normalize(raw, fx) {
+        var res = {};
+        LEVELS.forEach(function (L) {
+            var k = L.k, d = DEFAULTS[k], r = (raw && raw[k]) || {};
+            var want = Array.isArray(r.styles) ? r.styles : [];
+            var styles = POOL[k].map(function (s) { return s.id; }).filter(function (id) { return want.indexOf(id) !== -1; });
+            if (!styles.length) {
+                styles = d.styles.slice();
+                if (k === "h4" && !(raw && raw[k]) && fx && fx.flow) styles = ["flow", "gold"];
+            }
+            var g = Math.round(Number(r.group));
+            if (!isFinite(g) || g < 1) g = d.group;
+            g = Math.min(20, g);
+            var a = ANIMS.some(function (x) { return x[0] === r.anim; }) ? r.anim : d.anim;
+            res[k] = { styles: styles, group: g, anim: a };
+        });
+        return res;
+    }
+    cfg = normalize(null, null);
+
+    function setAttr(el, n, v) {
+        if (v === null) { if (el.hasAttribute(n)) el.removeAttribute(n); }
+        else if (el.getAttribute(n) !== String(v)) el.setAttribute(n, v);
+    }
     function apply() {
         raf = 0;
-        var c4 = 0, c5 = 0;
+        var cnt = { h3: 0, h4: 0, h5: 0 };
         Array.prototype.forEach.call(out.children, function (el) {
-            var v = null;
-            if (el.tagName === "H4") v = h4Styles()[Math.floor(c4++ / GROUP) % h4Styles().length]; /* 流光边框(1) 默认不用，只用金橙斜切(2)；设置里勾选后两种轮换 */
-            else if (el.tagName === "H5") v = Math.floor(c5++ / GROUP) % STYLES;
-            if (v !== null && el.getAttribute("data-sub") !== String(v)) el.setAttribute("data-sub", v);
+            var k = el.tagName.toLowerCase(), c = cfg[k];
+            if (!c) return;
+            var id = c.styles[Math.floor(cnt[k]++ / c.group) % c.styles.length];
+            var st = POOL[k].filter(function (s) { return s.id === id; })[0];
+            setAttr(el, "data-sub", st ? st.sub : null);
+            setAttr(el, "data-anim", c.anim === "default" ? null : c.anim);
         });
     }
     new MutationObserver(function () { if (!raf) raf = requestAnimationFrame(apply); })
         .observe(out, { childList: true });
     window.applySubHeadStyles = apply;
+
+    /* ---------- 设置面板用的接口 ---------- */
+    function buildUI(box) {
+        if (!box) return;
+        var animBtns = ANIMS.map(function (a) {
+            return '<button type="button" class="hdAnimBtn" data-v="' + a[0] + '" title="' + a[3] + '"><em class="hdAnimIc" data-v="' + a[0] + '">' + a[2] + '</em><em class="hdAnimNm">' + a[1] + '</em></button>';
+        }).join("");
+        box.innerHTML = LEVELS.map(function (L) {
+            var chips = POOL[L.k].map(function (s) {
+                return '<label class="hdChip"><input type="checkbox" data-sid="' + s.id + '"' + (POOL[L.k].length === 1 ? " disabled" : "") + ' />' +
+                    '<em class="hdSw" style="background:' + s.sw + '"></em><em>' + s.name + '</em></label>';
+            }).join("");
+            return '<div class="hdCard" data-lv="' + L.k + '"><div class="hdCardTitle">' + L.title + '</div>' +
+                '<div class="hdRowLabel">使用的样式</div><div class="hdChips">' + chips + '</div>' +
+                '<div class="hdOptRow"><label>每连续</label><input type="number" class="hdGroup" min="1" max="20" /><label>个换一种样式</label></div>' +
+                '<div class="hdRowLabel">动效</div><div class="hdAnimGrid"><input type="hidden" class="hdAnim" value="default" />' + animBtns + '</div></div>';
+        }).join("");
+        /* 点动效按钮：写入隐藏的 .hdAnim 并触发 change，设置面板据此实时预览 */
+        box.onclick = function (e) {
+            var btn = e.target.closest ? e.target.closest(".hdAnimBtn") : null;
+            if (!btn || !box.contains(btn)) return;
+            var card = btn.closest(".hdCard"), inp = card.querySelector(".hdAnim");
+            if (inp.value === btn.getAttribute("data-v")) return;
+            inp.value = btn.getAttribute("data-v");
+            markAnim(card);
+            inp.dispatchEvent(new Event("change", { bubbles: true }));
+        };
+    }
+    function markAnim(card) {
+        var v = card.querySelector(".hdAnim").value;
+        Array.prototype.forEach.call(card.querySelectorAll(".hdAnimBtn"), function (b) { b.classList.toggle("on", b.getAttribute("data-v") === v); });
+    }
+    function refreshState(box) {
+        Array.prototype.forEach.call(box.querySelectorAll(".hdCard"), function (card) {
+            var n = card.querySelectorAll(".hdChips input:checked").length;
+            card.querySelector(".hdGroup").disabled = n <= 1;
+        });
+    }
+    function syncUI(box, c) {
+        if (!box) return;
+        c = normalize(c, null);
+        Array.prototype.forEach.call(box.querySelectorAll(".hdCard"), function (card) {
+            var k = card.getAttribute("data-lv");
+            Array.prototype.forEach.call(card.querySelectorAll(".hdChips input"), function (i) {
+                i.checked = c[k].styles.indexOf(i.getAttribute("data-sid")) !== -1;
+            });
+            card.querySelector(".hdGroup").value = c[k].group;
+            card.querySelector(".hdAnim").value = c[k].anim;
+            markAnim(card);
+        });
+        refreshState(box);
+    }
+    function readUI(box) {
+        var res = {};
+        Array.prototype.forEach.call(box.querySelectorAll(".hdCard"), function (card) {
+            var k = card.getAttribute("data-lv");
+            res[k] = {
+                styles: Array.prototype.map.call(card.querySelectorAll(".hdChips input:checked"), function (i) { return i.getAttribute("data-sid"); }),
+                group: card.querySelector(".hdGroup").value,
+                anim: card.querySelector(".hdAnim").value
+            };
+        });
+        return normalize(res, null);
+    }
+    window.HeadStyles = {
+        pool: POOL, anims: ANIMS, defaults: DEFAULTS,
+        normalize: normalize, buildUI: buildUI, syncUI: syncUI, readUI: readUI, refreshState: refreshState,
+        set: function (c) { cfg = normalize(c, null); apply(); }
+    };
     apply();
 })();
 </script>
