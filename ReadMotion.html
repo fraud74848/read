@@ -14,6 +14,174 @@
     <link rel="stylesheet" href="renders.css" />
     <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
     <script src="renders.js"></script>
+<script id="storeScript">
+/* 内容存储：IndexedDB（容量大，异步写入）。浏览器不支持 / 被禁用时自动回退到 localStorage（约 5MB）。
+   存的三项：lastOpenedFile（页面内容）、manualAdditions（新增内容记录）、customBackground（自定义背景）。
+   格式和以前完全一样（都是 JSON 文字），所以旧数据可以原样迁移。其余小设置（界面设置、时区等）仍在 localStorage。
+   页面的其它代码仍然“同步读写”：启动时先把数据读进内存（用 jQuery.holdReady 暂缓页面初始化，通常只需几毫秒），
+   之后读取走内存，写入立即更新内存并在后台写进 IndexedDB。 */
+(function () {
+    var KEYS = ["lastOpenedFile", "manualAdditions", "customBackground"];
+    var DB_NAME = "txtReaderStore", ST = "kv";
+    var cache = {}, dirty = {}, inflight = null, db = null, mode = "init", flushing = false, settled = false, lastErr = 0, migrated = false;
+    var PEND = "__pending_";   // 页面卸载时，把“还没来得及写进 IndexedDB”的内容临时放一份在这里，下次打开时补写（防止刚改完就刷新而丢失）
+
+    function ls(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+    function lsRemove(k) { try { localStorage.removeItem(k); } catch (e) { } }
+    function notifyErr() {
+        var now = Date.now(); if (now - lastErr < 5000) return; lastErr = now;
+        if (typeof showToastGlobal === "function") showToastGlobal("⚠️ 存储空间不足或被禁用，内容没能保存到本地，刷新后可能丢失");
+    }
+
+    /* ---------- IndexedDB 基础操作 ---------- */
+    function openDb() {
+        return new Promise(function (res, rej) {
+            if (!window.indexedDB) { rej(new Error("no indexedDB")); return; }
+            var r; try { r = indexedDB.open(DB_NAME, 1); } catch (e) { rej(e); return; }
+            r.onupgradeneeded = function () { if (!r.result.objectStoreNames.contains(ST)) r.result.createObjectStore(ST); };
+            r.onsuccess = function () { res(r.result); };
+            r.onerror = function () { rej(r.error); };
+            r.onblocked = function () { rej(new Error("blocked")); };
+        });
+    }
+    function idbGetAll() {
+        return new Promise(function (res, rej) {
+            var tx = db.transaction(ST, "readonly"), st = tx.objectStore(ST), out = {}, n = KEYS.length;
+            KEYS.forEach(function (k) {
+                var q = st.get(k);
+                q.onsuccess = function () { if (q.result !== undefined) out[k] = q.result; if (--n === 0) res(out); };
+                q.onerror = function () { rej(q.error); };
+            });
+        });
+    }
+    function idbWrite(batch) {          // batch: { key: 字符串 | null(=删除) }
+        return new Promise(function (res, rej) {
+            var tx = db.transaction(ST, "readwrite"), st = tx.objectStore(ST);
+            Object.keys(batch).forEach(function (k) { if (batch[k] === null) st.delete(k); else st.put(batch[k], k); });
+            tx.oncomplete = function () { res(); };
+            tx.onerror = function () { rej(tx.error); };
+            tx.onabort = function () { rej(tx.error || new Error("abort")); };
+        });
+    }
+
+    /* ---------- 启动：读入内存 + 迁移旧的 localStorage 数据 ---------- */
+    function init() {
+        return openDb().then(function (d) { db = d; return idbGetAll(); }).then(function (stored) {
+            // 上次页面卸载时没写完的内容：它比 IndexedDB 里的更新，优先采用并补写
+            var pendKeys = [], pendBatch = {};
+            KEYS.forEach(function (k) {
+                var pv = ls(PEND + k);
+                if (pv === null) return;
+                pendKeys.push(k);
+                if (pv === "D") { delete stored[k]; pendBatch[k] = null; }
+                else { stored[k] = pv.slice(1); pendBatch[k] = pv.slice(1); }
+            });
+            var applyPend = pendKeys.length ? idbWrite(pendBatch).then(function () { pendKeys.forEach(function (k) { lsRemove(PEND + k); }); }, function () { /* 写不进去就保留临时副本，下次再试；本次仍然使用它 */ }) : Promise.resolve();
+            return applyPend.then(function () { return stored; });
+        }).then(function (stored) {
+            var mig = {};
+            KEYS.forEach(function (k) { if (stored[k] === undefined) { var v = ls(k); if (v !== null) mig[k] = v; } });
+            var mk = Object.keys(mig);
+            if (!mk.length) return stored;
+            // 先写入 IndexedDB、读回来逐项核对一致，确认无误才删除 localStorage 里的旧数据；核对不过就保留旧数据，什么都不丢
+            return idbWrite(mig).then(idbGetAll).then(function (chk) {
+                mk.forEach(function (k) {
+                    stored[k] = mig[k];
+                    if (chk[k] === mig[k]) { lsRemove(k); migrated = true; }
+                });
+                return stored;
+            });
+        }).then(function (stored) {
+            if (settled) return;
+            cache = stored; mode = "idb";
+        });
+    }
+    function fallbackLS() {
+        if (settled) return;
+        mode = "localStorage"; cache = {};
+        KEYS.forEach(function (k) { var v = ls(k); if (v !== null) cache[k] = v; });
+    }
+
+    /* ---------- 写入：先更新内存，再合并成一次事务写进 IndexedDB ---------- */
+    function schedule() { Promise.resolve().then(flush); }
+    function flush() {
+        if (mode !== "idb" || flushing || !Object.keys(dirty).length) return Promise.resolve();
+        flushing = true;
+        var batch = dirty; dirty = {}; inflight = batch;
+        return idbWrite(batch).then(function () {
+            flushing = false; inflight = null;
+            Object.keys(batch).forEach(function (k) { lsRemove(PEND + k); });   // 已经安全写入：临时副本作废
+            if (Object.keys(dirty).length) return flush();
+        }, function () {
+            flushing = false; inflight = null;
+            Object.keys(batch).forEach(function (k) { if (!(k in dirty)) dirty[k] = batch[k]; });   // 没写成功的放回去，下次再试
+            notifyErr();
+        });
+    }
+    function whenIdle() {
+        if (mode !== "idb") return Promise.resolve();
+        return new Promise(function (res) {
+            (function chk() { if (!flushing && !Object.keys(dirty).length) res(); else { schedule(); setTimeout(chk, 20); } })();
+        });
+    }
+    // 页面卸载（刷新 / 关闭）时：还没写完的内容先同步放一份临时副本（localStorage 容量不够时放弃，属于尽力而为），再继续写 IndexedDB
+    window.addEventListener("pagehide", function () {
+        if (mode === "idb") {
+            var pend = {}, k;
+            if (inflight) for (k in inflight) pend[k] = inflight[k];
+            for (k in dirty) pend[k] = dirty[k];
+            Object.keys(pend).forEach(function (key) { try { localStorage.setItem(PEND + key, pend[key] === null ? "D" : "V" + pend[key]); } catch (e) { } });
+        }
+        flush();
+    });
+    document.addEventListener("visibilitychange", function () { if (document.hidden) flush(); });
+
+    var api = window.Store = {
+        get: function (k) { return Object.prototype.hasOwnProperty.call(cache, k) ? cache[k] : null; },
+        set: function (k, v) {
+            if (mode === "localStorage") {
+                try { localStorage.setItem(k, v); cache[k] = v; return true; } catch (e) { notifyErr(); return false; }
+            }
+            cache[k] = v; dirty[k] = v; schedule(); return true;
+        },
+        remove: function (k) {
+            delete cache[k];
+            if (mode === "localStorage") { lsRemove(k); return; }
+            dirty[k] = null; schedule();
+        },
+        clearAll: function () {              // “清除”按钮用：清空内存和 IndexedDB 里的这三项
+            cache = {}; dirty = {};
+            if (mode !== "idb") { KEYS.forEach(lsRemove); return Promise.resolve(); }
+            return whenIdle().then(function () { var b = {}; KEYS.forEach(function (k) { b[k] = null; }); return idbWrite(b); }).catch(function () { });
+        },
+        whenIdle: whenIdle,
+        mode: function () { return mode; },
+        migrated: function () { return migrated; },
+
+        /* ----- 存储空间信息（设置 → 备份） ----- */
+        info: function () {
+            var o = { mode: mode, sizes: {}, total: 0 };
+            KEYS.forEach(function (k) { var n = (cache[k] || "").length; o.sizes[k] = n; o.total += n; });
+            var tasks = [];
+            if (navigator.storage && navigator.storage.estimate) tasks.push(navigator.storage.estimate().then(function (e) { o.usage = e.usage; o.quota = e.quota; }, function () { }));
+            if (navigator.storage && navigator.storage.persisted) tasks.push(navigator.storage.persisted().then(function (p) { o.persisted = p; }, function () { }));
+            return Promise.all(tasks).then(function () { return o; });
+        },
+        persist: function () {
+            if (!(navigator.storage && navigator.storage.persist)) return Promise.resolve(false);
+            return navigator.storage.persist().catch(function () { return false; });
+        }
+    };
+
+    /* ---------- 启动流程：暂缓 jQuery 的 ready，等数据读进内存后再放行 ---------- */
+    var hasHold = !!(window.jQuery && jQuery.holdReady);
+    if (hasHold) jQuery.holdReady(true);
+    var released = false;
+    function release() { if (released) return; released = true; if (hasHold) jQuery.holdReady(false); }
+    var timer = setTimeout(function () { fallbackLS(); settled = true; release(); }, 4000);   // 极端情况下（IndexedDB 被卡住）不让页面一直等
+    init().catch(function () { fallbackLS(); }).then(function () { settled = true; clearTimeout(timer); release(); });
+})();
+</script>
     <style id="mouseRippleStyles">
 /* ===== 鼠标移动波纹（默认关闭，在 设置→特效 中开启） ===== */
 #mouse-ripple-container{position:fixed;left:0;top:0;width:100%;height:100%;pointer-events:none;overflow:hidden;z-index:1000000;contain:strict}
@@ -507,7 +675,7 @@
                     lineHeight: "1.6",
                     color: "#2f3150",
                 })
-                .html('<div class="gcHead"><span class="gcLogo">📖</span><div><div class="gcHeadTitle">使用说明</div><div class="gcHeadSub">👋 欢迎使用～这里还没有任何内容。点击顶部工具栏 <b>“📤 导入/出”</b> 导入文件，或用 <b>“➕ 新增”</b> 手动添加，导入后这份说明会自动消失。</div></div></div><div class="gcGrid"><div class="gcItem"><div class="gcTop"><span class="gcIcon">➕</span><span class="gcTitle">新增</span></div><div class="gcDesc">添加大标题、小标题、内容或图片，可以多条一起加。</div></div><div class="gcItem"><div class="gcTop"><span class="gcIcon">🖼️</span><span class="gcTitle">背景</span></div><div class="gcDesc">设置自定义背景图片或视频，也可以一键恢复默认背景。</div></div><div class="gcItem"><div class="gcTop"><span class="gcIcon">⚙️</span><span class="gcTitle">设置</span></div><div class="gcDesc">调节界面透明度、沉浸模式（无操作自动隐藏工具栏和菜单）、左侧菜单颜色。<b>特效开关</b>可关掉毛玻璃、循环光效或暂停视频背景来减少卡顿；<b>标题</b>选项卡可分别设置 H3 / H4 / H5 的样式（多选时轮换）和动效（扫光、呼吸光等）；<b>时间</b>选项卡可设置底部时间栏显示几栏、每栏显示哪个国家的时间；还能开启<b>每月自动备份</b>并自定义文件名。</div></div><div class="gcItem"><div class="gcTop"><span class="gcIcon">📤</span><span class="gcTitle">导入 / 导出</span></div><div class="gcDesc">导入 .txt / .json / .csv 文件，或把当前内容导出保存。</div></div><div class="gcItem"><div class="gcTop"><span class="gcIcon">📋</span><span class="gcTitle">复制</span></div><div class="gcDesc">点击内容文字即可复制。鼠标经过图片时，底部出现名称栏（点笔图标可改名），右上角出现复制按钮，点击复制图片。</div></div><div class="gcItem"><div class="gcTop"><span class="gcIcon">🔍</span><span class="gcTitle">查看图片</span></div><div class="gcDesc">点击图片放大查看；顶部的“复制”按钮和底部的复制图标会复制图片并自动关闭查看器。</div></div><div class="gcItem"><div class="gcTop"><span class="gcIcon">🖱️</span><span class="gcTitle">右键菜单</span></div><div class="gcDesc">在大标题、小标题、内容或图片上点右键，可以编辑、插入新内容、删除，或进入“批量删除”一次选中多项再删除。</div></div><div class="gcItem"><div class="gcTop"><span class="gcIcon">🕐</span><span class="gcTitle">时区切换</span></div><div class="gcDesc">点击顶部右侧的时间，可在北京、印度、墨西哥、日本、土耳其、法国、德国、英国、美国、巴西、澳大利亚等 <b>30 多个国家和地区</b>的时间之间切换，默认北京时间，选择会被记住。列表上方有<b>搜索框</b>，可输入中文、英文、拼音或时差（如 +5:30）快速查找，回车即选中。</div></div><div class="gcItem"><div class="gcTop"><span class="gcIcon">🍀</span><span class="gcTitle">隐藏工具栏</span></div><div class="gcDesc">点击左上角的🍀图标，随时隐藏或显示顶部工具栏。</div></div><div class="gcItem"><div class="gcTop"><span class="gcIcon">🧹</span><span class="gcTitle">清除</span></div><div class="gcDesc">清除本地保存的内容并刷新，恢复到这份说明。清除前建议先导出或备份。</div></div></div><div class="gcFoot">💾 内容会自动保存在浏览器本地，刷新页面也不会丢失。</div>');
+                .html('<div class="gcHead"><span class="gcLogo">📖</span><div><div class="gcHeadTitle">使用说明</div><div class="gcHeadSub">👋 欢迎使用～这里还没有任何内容。点击顶部工具栏 <b>“📤 导入/出”</b> 导入文件，或用 <b>“➕ 新增”</b> 手动添加，导入后这份说明会自动消失。</div></div></div><div class="gcGrid"><div class="gcItem"><div class="gcTop"><span class="gcIcon">➕</span><span class="gcTitle">新增</span></div><div class="gcDesc">添加大标题、小标题、内容或图片，可以多条一起加。</div></div><div class="gcItem"><div class="gcTop"><span class="gcIcon">🖼️</span><span class="gcTitle">背景</span></div><div class="gcDesc">设置自定义背景图片或视频，也可以一键恢复默认背景。</div></div><div class="gcItem"><div class="gcTop"><span class="gcIcon">⚙️</span><span class="gcTitle">设置</span></div><div class="gcDesc">调节界面透明度、沉浸模式（无操作自动隐藏工具栏和菜单）、字号、行距、卡片颜色（18 种预设，可自定义渐变颜色和方向）、阅读位置记忆（都在「界面」选项卡里），以及左侧菜单颜色。<b>特效开关</b>可关掉毛玻璃、循环光效或暂停视频背景来减少卡顿；<b>标题</b>选项卡可分别设置 H3 / H4 / H5 的样式（多选时轮换）和动效（扫光、呼吸光等）；<b>时间</b>选项卡可设置底部时间栏显示几栏、每栏显示哪个国家的时间；还能开启<b>每月自动备份</b>、自定义文件名，并可<b>导出 / 导入设置</b>。</div></div><div class="gcItem"><div class="gcTop"><span class="gcIcon">📤</span><span class="gcTitle">导入 / 导出</span></div><div class="gcDesc">导入 .txt / .json / .csv 文件，或把当前内容导出保存。</div></div><div class="gcItem"><div class="gcTop"><span class="gcIcon">📋</span><span class="gcTitle">复制</span></div><div class="gcDesc">点击内容文字即可复制。鼠标经过图片时，底部出现名称栏（点笔图标可改名），右上角出现复制按钮，点击复制图片。</div></div><div class="gcItem"><div class="gcTop"><span class="gcIcon">🔍</span><span class="gcTitle">查看图片</span></div><div class="gcDesc">点击图片放大查看；顶部的“复制”按钮和底部的复制图标会复制图片并自动关闭查看器。</div></div><div class="gcItem"><div class="gcTop"><span class="gcIcon">🖱️</span><span class="gcTitle">右键菜单</span></div><div class="gcDesc">在大标题、小标题、内容或图片上点右键，可以编辑、插入新内容、删除，或进入“批量删除”一次选中多项再删除。新增、修改、删除后都可点底部的<b>撤销</b>，或按 <b>Ctrl+Z</b> 恢复。</div></div><div class="gcItem"><div class="gcTop"><span class="gcIcon">🕐</span><span class="gcTitle">时区切换</span></div><div class="gcDesc">点击顶部右侧的时间，可在北京、印度、墨西哥、日本、土耳其、法国、德国、英国、美国、巴西、澳大利亚等 <b>30 多个国家和地区</b>的时间之间切换，默认北京时间，选择会被记住。列表上方有<b>搜索框</b>，可输入中文、英文、拼音或时差（如 +5:30）快速查找，回车即选中。</div></div><div class="gcItem"><div class="gcTop"><span class="gcIcon">🍀</span><span class="gcTitle">隐藏工具栏</span></div><div class="gcDesc">点击左上角的🍀图标，随时隐藏或显示顶部工具栏。</div></div><div class="gcItem"><div class="gcTop"><span class="gcIcon">⌨️</span><span class="gcTitle">快捷键</span></div><div class="gcDesc"><b>Ctrl+Z</b> 撤销删除，<b>Ctrl+Shift+Z</b> 重做，<b>Esc</b> 关闭面板；<b>N</b> 新增、<b>B</b> 背景、<b>S</b> 设置、<b>I</b> 导入/出、<b>T</b> 时区、<b>H</b> 隐藏工具栏。按 <b>?</b> 查看全部。</div></div><div class="gcItem"><div class="gcTop"><span class="gcIcon">🧹</span><span class="gcTitle">清除</span></div><div class="gcDesc">清除本地保存的内容并刷新，恢复到这份说明。清除前建议先导出或备份。</div></div></div><div class="gcFoot">💾 内容会自动保存在浏览器本地，刷新页面也不会丢失。</div>');
 
             outputDiv.append(prompt);
         }
@@ -523,7 +691,7 @@
             // 【修复】原来这里没有 try/catch：内容太大（比如含多张 base64 图片）超出 localStorage 容量时会直接抛异常，
             // 导致导入的文件根本没有渲染出来，或者右键编辑的结果悄悄没保存。现在失败时只提示，不再中断后续渲染。
             try {
-                localStorage.setItem(STORAGE_KEY, JSON.stringify(fileData));
+                if (!Store.set(STORAGE_KEY, JSON.stringify(fileData))) throw new Error("存储失败");
                 // 保存后标记为非第一次加载
                 localStorage.setItem(FIRST_LOAD_KEY, "false");
                 isFirstLoad = false;
@@ -557,7 +725,7 @@
 
         function loadCustomBackground() {
             try {
-                const raw = localStorage.getItem(CUSTOM_BG_KEY);
+                const raw = Store.get(CUSTOM_BG_KEY);
                 if (!raw) return null;
                 const parsed = JSON.parse(raw);
                 // 兼容旧版本数据（没有 kind 字段时，默认当作图片处理）
@@ -571,8 +739,7 @@
 
         function saveCustomBackground(bg) {
             try {
-                localStorage.setItem(CUSTOM_BG_KEY, JSON.stringify(bg));
-                return true;
+                return Store.set(CUSTOM_BG_KEY, JSON.stringify(bg));
             } catch (e) {
                 console.warn("保存自定义背景失败（可能图片过大超出本地存储限制）:", e);
                 return false;
@@ -581,7 +748,7 @@
 
         function clearCustomBackground() {
             try {
-                localStorage.removeItem(CUSTOM_BG_KEY);
+                Store.remove(CUSTOM_BG_KEY);
             } catch (e) {
                 console.warn("清除自定义背景失败:", e);
             }
@@ -679,7 +846,7 @@
 
         function loadManualAdditions() {
             try {
-                const raw = localStorage.getItem(MANUAL_ADD_KEY);
+                const raw = Store.get(MANUAL_ADD_KEY);
                 return raw ? JSON.parse(raw) : [];
             } catch (e) {
                 console.error("读取新增内容失败:", e);
@@ -689,7 +856,7 @@
 
         function saveManualAdditions(list) {
             try {
-                localStorage.setItem(MANUAL_ADD_KEY, JSON.stringify(list));
+                Store.set(MANUAL_ADD_KEY, JSON.stringify(list));
             } catch (e) {
                 console.error("保存新增内容失败（可能超出本地存储容量）:", e);
             }
@@ -832,7 +999,7 @@
              * 现在把它移到 ready 内部，和 processFile 处于同一作用域，即可正常访问。
              */
             function loadLastFile() {
-                const lastFileData = localStorage.getItem(STORAGE_KEY);
+                const lastFileData = Store.get(STORAGE_KEY);
                 if (lastFileData) {
                     try {
                         const parsedStorage = JSON.parse(lastFileData);
@@ -3414,6 +3581,7 @@
                 showToastGlobal = showToast;
                 // 【新增】桥接给底部"图片名称"脚本：改名后立刻保存当前内容
                 window.persistOutputGlobal = function () { persistCurrentOutput(); };
+                window.rebuildH3ListGlobal = function () { rebuildH3List(); };   // 撤销 / 重做删除后，用它重新生成左侧目录
 
                 // ======================
                 // 【新增】自定义删除确认弹窗（替代原生 window.confirm，样式与整体UI统一）
@@ -3556,7 +3724,7 @@
                         const payload = JSON.stringify({ version: 1, blocks: blocks });
                         let fileName = (($("title").text() || "内容").trim() || "内容") + ".json";
                         try {
-                            const raw = localStorage.getItem(STORAGE_KEY);
+                            const raw = Store.get(STORAGE_KEY);
                             if (raw) {
                                 const parsed = JSON.parse(raw);
                                 if (parsed && parsed.fileName) {
@@ -4349,11 +4517,20 @@
 
                     // ---------- 左侧菜单颜色：4 种默认配色 + 自定义三色渐变（上下 / 左右） ----------
                     // 4 种默认配色 = 页面原本按序号自动使用的 蓝 / 青 / 绿 / 紫 渐变
+                    const mp = function (a, b, c, d) { return [a, b, c, d, c, b, a]; };   // 深 → 亮 → 深 的 7 段对称渐变
                     const MENU_PRESETS = [
                         { name: "蓝", stops: ["#045e88", "#045e88", "#1c84b4", "#278ebe", "#1c84b4", "#045e88", "#045e88"] },
                         { name: "青", stops: ["#016464", "#008080", "#019191", "#01a3a3", "#019191", "#008080", "#016464"] },
                         { name: "绿", stops: ["#36702e", "#3b8031", "#429336", "#4a9c3f", "#429336", "#3b8031", "#36702e"] },
                         { name: "紫", stops: ["#6715b4", "#741fc4", "#8a2be2", "#a150ec", "#8a2be2", "#741fc4", "#6715b4"] },
+                        // 以下为新增预设（追加在后面，原有 4 种的序号不变，已保存的设置不受影响）
+                        { name: "橙", stops: mp("#9a3d07", "#c2530a", "#e06a12", "#f2822a") },
+                        { name: "红", stops: mp("#8f1224", "#b01a30", "#d02a3f", "#e8465a") },
+                        { name: "粉", stops: mp("#a3155f", "#c21c78", "#de2f92", "#f157a9") },
+                        { name: "靛蓝", stops: mp("#2a2f8f", "#3a41b3", "#4c55d1", "#6b73e8") },
+                        { name: "金棕", stops: mp("#7a5a0e", "#966f12", "#b5871a", "#d1a22c") },
+                        { name: "石墨", stops: mp("#1f2937", "#2d3a4d", "#3d4d64", "#51647e") },
+                        { name: "深海", stops: mp("#0a2a4a", "#0f3d6b", "#165088", "#2268a8") },
                     ];
                     const colorCtx = document.createElement("canvas").getContext("2d");
 
@@ -4413,7 +4590,7 @@
                             });
                             const lum = n ? sum / n : 0;
                             return {
-                                bg: "linear-gradient(" + (r.dir === "h" ? "to right" : "to bottom") + "," + cs.join(",") + ")",
+                                bg: "linear-gradient(" + (r.dir === "h" ? "to right" : r.dir === "d" ? "135deg" : "to bottom") + "," + cs.join(",") + ")",
                                 fg: lum > 170 ? "#16202b" : "#fff",
                             };
                         }
@@ -4451,7 +4628,7 @@
                         if (mode === "custom") {
                             return {
                                 mode: "custom",
-                                dir: $row.find(".mcDir").val() === "h" ? "h" : "v",
+                                dir: ["h", "d"].indexOf($row.find(".mcDir").val()) !== -1 ? $row.find(".mcDir").val() : "v",
                                 colors: $row.find(".mcCode").map(function () { return $.trim($(this).val()); }).get(),
                             };
                         }
@@ -4502,7 +4679,7 @@
                         const row = $('<div class="menuColorRow">');
                         const modeSel = $('<select class="mcMode">');
                         MENU_PRESETS.forEach(function (p, i) {
-                            modeSel.append($("<option>").val("p" + i).text("默认 · " + p.name));
+                            modeSel.append($("<option>").val("p" + i).text("预设 · " + p.name));
                         });
                         modeSel.append($("<option>").val("custom").text("自定义渐变"));
                         modeSel.val(r.mode === "custom" ? "custom" : "p" + (r.preset || 0));
@@ -4531,7 +4708,8 @@
                         const dirSel = $('<select class="mcDir">')
                             .append($("<option>").val("v").text("上下渐变（从上到下）"))
                             .append($("<option>").val("h").text("左右渐变（从左到右）"))
-                            .val(r.dir === "h" ? "h" : "v");
+                            .append($("<option>").val("d").text("斜向渐变（左上到右下）"))
+                            .val(r.dir === "h" || r.dir === "d" ? r.dir : "v");
                         const custom = $('<div class="mcCustom">').append(
                             stops,
                             $('<div class="mcDirRow">').append($("<span>").text("方向"), dirSel),
@@ -4571,6 +4749,163 @@
                         previewMenuColors();
                     });
 
+
+                    // ---------- 鼠标经过样式（渐变）：对左侧所有菜单按钮生效；选中（高亮）的按钮保持原样 ----------
+                    // 存储格式：{ preset: "default" | "h0".."hN" | "custom", dir, colors }；default = 页面原本的 粉 → 橙 渐变
+                    const HOVER_PRESETS = [
+                        { name: "热粉橙", dir: "d", colors: ["#ff69b4", "#ffa24d", "#ff8c00"] },
+                        { name: "烈焰", dir: "d", colors: ["#e01010", "#ff6a00", "#ffc300"] },
+                        { name: "日落", dir: "d", colors: ["#ff512f", "#f09819", "#ff0080"] },
+                        { name: "蜜桃", dir: "d", colors: ["#ff9a9e", "#fecfef", "#ff9a9e"] },
+                        { name: "樱花", dir: "v", colors: ["#ffb7d5", "#ff69b4", "#ffb7d5"] },
+                        { name: "玫瑰", dir: "v", colors: ["#e11d48", "#fb7185", "#e11d48"] },
+                        { name: "洋红", dir: "v", colors: ["#c026d3", "#f472b6", "#c026d3"] },
+                        { name: "紫罗兰", dir: "v", colors: ["#7c3aed", "#a78bfa", "#7c3aed"] },
+                        { name: "极光", dir: "d", colors: ["#00c2d1", "#7b2cff", "#fb00ff"] },
+                        { name: "靛蓝", dir: "v", colors: ["#4338ca", "#6366f1", "#4338ca"] },
+                        { name: "天蓝", dir: "v", colors: ["#0ea5e9", "#38bdf8", "#0ea5e9"] },
+                        { name: "海洋", dir: "d", colors: ["#00c6ff", "#0072ff", "#00c6ff"] },
+                        { name: "青碧", dir: "d", colors: ["#06b6d4", "#34d399", "#06b6d4"] },
+                        { name: "薄荷", dir: "v", colors: ["#34d399", "#a7f3d0", "#34d399"] },
+                        { name: "翠绿", dir: "v", colors: ["#16a34a", "#4ade80", "#16a34a"] },
+                        { name: "柠檬", dir: "v", colors: ["#facc15", "#fde68a", "#facc15"] },
+                        { name: "鎏金", dir: "v", colors: ["#b8860b", "#ffd700", "#b8860b"] },
+                        { name: "橙黄", dir: "h", colors: ["#f97316", "#fbbf24", "#f97316"] },
+                        { name: "冰晶", dir: "d", colors: ["#e0ffff", "#7fdbff", "#4facfe"] },
+                        { name: "糖果", dir: "d", colors: ["#ff9a9e", "#a18cd1", "#8fd3f4"] },
+                        { name: "彩虹", dir: "h", colors: ["#ff0080", "#ffe600", "#00f2fe"] },
+                        { name: "赛博", dir: "h", colors: ["#ff00ff", "#00ffff", "#ff00ff"] },
+                        { name: "石墨", dir: "v", colors: ["#334155", "#64748b", "#334155"] },
+                        { name: "午夜", dir: "v", colors: ["#0f172a", "#1e3a8a", "#0f172a"] },
+                    ];
+                    const HOVER_DEFAULT_BG = "linear-gradient(to bottom, hotpink, darkorange)";
+                    const $mhBox = $("#menuHoverBox");
+                    let savedMenuHover = { preset: "default" };
+                    let menuHover = { preset: "default" };
+                    let mhDraft = { preset: "default", dir: "v", colors: ["#ec4899", "#f9a8d4", "#ec4899"] };
+
+                    function mhDir(d) { return d === "h" || d === "d" ? d : "v"; }
+                    function normalizeHover(r) {
+                        r = r && typeof r === "object" ? r : {};
+                        if (r.preset === "custom" && Array.isArray(r.colors) && r.colors.length >= 3) {
+                            return { preset: "custom", dir: mhDir(r.dir), colors: r.colors.slice(0, 3).map(String) };
+                        }
+                        const m = /^h(\d+)$/.exec(String(r.preset || ""));
+                        if (m && HOVER_PRESETS[+m[1]]) return { preset: "h" + (+m[1]) };
+                        return { preset: "default" };
+                    }
+                    // 返回 { bg, fg }；default 或颜色无效时返回 null（= 用页面原本的悬停样式）
+                    function hoverStyle(h) {
+                        if (h.preset === "custom") return ruleStyle({ mode: "custom", dir: h.dir, colors: h.colors });
+                        const m = /^h(\d+)$/.exec(h.preset);
+                        if (m) { const p = HOVER_PRESETS[+m[1]]; return ruleStyle({ mode: "custom", dir: p.dir, colors: p.colors }); }
+                        return null;
+                    }
+                    function applyMenuHover() {
+                        const st = hoverStyle(menuHover), root = document.documentElement;
+                        if (st) {
+                            root.setAttribute("data-mh", "1");
+                            root.style.setProperty("--mh-bg", st.bg);
+                            root.style.setProperty("--mh-fg", st.fg);
+                        } else {
+                            root.removeAttribute("data-mh");
+                            root.style.removeProperty("--mh-bg");
+                            root.style.removeProperty("--mh-fg");
+                        }
+                    }
+                    function mhCurrent() {
+                        return mhDraft.preset === "custom"
+                            ? { preset: "custom", dir: mhDraft.dir, colors: mhDraft.colors.slice() }
+                            : { preset: mhDraft.preset };
+                    }
+
+                    function buildHoverUI() {
+                        if (!$mhBox.length) return;
+                        let h = '<div class="mhHead"><div class="mhDemo" id="mhDemo">鼠标经过效果预览</div></div><div class="mhGrid">';
+                        h += '<button type="button" class="mhChip" data-id="default" style="background:' + HOVER_DEFAULT_BG + ';color:#fff">默认</button>';
+                        HOVER_PRESETS.forEach(function (p, i) {
+                            const st = ruleStyle({ mode: "custom", dir: p.dir, colors: p.colors });
+                            h += '<button type="button" class="mhChip" data-id="h' + i + '" style="background:' + st.bg + ';color:' + st.fg + '">' + p.name + '</button>';
+                        });
+                        h += '<button type="button" class="mhChip mhChipCustom" data-id="custom">🎨 自定义</button></div>';
+                        h += '<div class="menuColorRow mhCustom"><div class="mcCustom"><div class="mcStops">';
+                        for (let k = 0; k < 3; k++) {
+                            h += '<label class="mcStop" title="第 ' + (k + 1) + ' 个颜色"><input type="color" class="mcSwatch" value="#000000"><input type="text" class="mcCode" spellcheck="false" autocomplete="off" placeholder="#ff0000"></label>';
+                        }
+                        h += '</div><div class="mcDirRow"><span>方向</span><select class="mcDir"><option value="v">上下渐变（从上到下）</option><option value="h">左右渐变（从左到右）</option><option value="d">斜向渐变（左上到右下）</option></select></div>';
+                        h += '<div class="mcHint">3 个颜色依次排列，可点色块取色，或直接输入 #ff0000 / rgb(255,0,0) / red 等颜色代码</div></div></div>';
+                        $mhBox.html(h);
+
+                        $mhBox.on("click", ".mhChip", function () {
+                            const id = $(this).data("id");
+                            if (id === mhDraft.preset) return;
+                            const cur = mhCurrent(), st = hoverStyle(cur);
+                            if (id === "custom") {
+                                // 从当前选中的预设出发开始自定义，不用从零配色
+                                const m = /^h(\d+)$/.exec(mhDraft.preset);
+                                if (m) { const p = HOVER_PRESETS[+m[1]]; mhDraft.dir = p.dir; mhDraft.colors = p.colors.slice(); }
+                                mhDraft.preset = "custom";
+                            } else {
+                                const m = /^h(\d+)$/.exec(id);
+                                if (m) { const p = HOVER_PRESETS[+m[1]]; mhDraft.dir = p.dir; mhDraft.colors = p.colors.slice(); }
+                                mhDraft.preset = id;
+                            }
+                            mhWriteInputs();
+                            mhPreview();
+                        });
+                        $mhBox.on("input change", ".mhCustom input, .mhCustom select", function () {
+                            const $t = $(this);
+                            if ($t.hasClass("mcSwatch")) $t.siblings(".mcCode").val($t.val());
+                            else if ($t.hasClass("mcCode")) {
+                                const n = normColor($t.val());
+                                if (n && /^#[0-9a-f]{6}$/i.test(n)) $t.siblings(".mcSwatch").val(n);
+                            }
+                            mhDraft.colors = $mhBox.find(".mcCode").map(function () { return $.trim($(this).val()); }).get();
+                            mhDraft.dir = mhDir($mhBox.find(".mcDir").val());
+                            mhPreview();
+                        });
+                    }
+                    function mhWriteInputs() {
+                        $mhBox.find(".mcStop").each(function (i) {
+                            const c = mhDraft.colors[i] || "#000000", n = normColor(c);
+                            $(this).find(".mcCode").val(c);
+                            $(this).find(".mcSwatch").val(n && /^#[0-9a-f]{6}$/i.test(n) ? n : "#000000");
+                        });
+                        $mhBox.find(".mcDir").val(mhDraft.dir);
+                    }
+                    // 标记无效的颜色代码，返回是否存在无效代码（仅自定义时检查）
+                    function mhMarkInvalid() {
+                        let bad = false;
+                        $mhBox.find(".mcStop").each(function () {
+                            const ok = mhDraft.preset !== "custom" || !!normColor($(this).find(".mcCode").val());
+                            $(this).toggleClass("invalid", !ok);
+                            if (!ok) bad = true;
+                        });
+                        return bad;
+                    }
+                    function mhMarkUI() {
+                        $mhBox.find(".mhChip").each(function () { $(this).toggleClass("on", $(this).data("id") === mhDraft.preset); });
+                        $mhBox.find(".mhCustom").toggleClass("isCustom", mhDraft.preset === "custom");
+                        const st = hoverStyle(mhCurrent());
+                        $("#mhDemo").css({ background: st ? st.bg : HOVER_DEFAULT_BG, color: st ? st.fg : "#fff" });
+                        mhMarkInvalid();
+                    }
+                    function mhPreview() {
+                        menuHover = mhCurrent();
+                        applyMenuHover();
+                        mhMarkUI();
+                    }
+                    function mhFill(h) {
+                        h = normalizeHover(h);
+                        const m = /^h(\d+)$/.exec(h.preset);
+                        if (h.preset === "custom") { mhDraft = { preset: "custom", dir: h.dir, colors: h.colors.slice() }; }
+                        else if (m) { const p = HOVER_PRESETS[+m[1]]; mhDraft = { preset: h.preset, dir: p.dir, colors: p.colors.slice() }; }
+                        else { mhDraft.preset = "default"; }
+                        mhWriteInputs();
+                        mhMarkUI();
+                    }
+                    $("#menuHoverResetBtn").on("click", function () { mhFill({ preset: "default" }); mhPreview(); });
+
                     // ---------- 初始化 ----------
                     const savedSettings = loadUiSettings();
                     opacitySlider.val(savedSettings.opacity);
@@ -4581,6 +4916,11 @@
                     menuColors = savedMenuColors.slice();
                     renderColorRows(savedMenuColors);
                     applyMenuColors();
+                    savedMenuHover = normalizeHover(savedSettings.menuHover);
+                    menuHover = savedMenuHover;
+                    buildHoverUI();
+                    mhFill(savedMenuHover);
+                    applyMenuHover();
                     resetIdleTimer();
 
                     opacitySlider.on("input", function () { applyOpacityValue(Number(this.value)); });
@@ -4702,6 +5042,20 @@
                         BT.set(d);
                     });
 
+                    // ---------- 阅读设置（字号 / 行距 / 记住阅读位置 / 返回顶部按钮） ----------
+                    const RP = window.ReadingPrefs;
+                    const rpBox = document.getElementById("rpBox");
+                    RP.buildUI(rpBox);
+                    let savedReading = RP.normalize(savedSettings.reading);
+                    RP.syncUI(rpBox, savedReading);
+                    RP.set(savedReading);
+                    $(rpBox).on("input change", "input", function () { RP.set(RP.readUI(rpBox)); });
+                    $("#rpResetBtn").on("click", function () {
+                        const d = RP.normalize(null);
+                        RP.syncUI(rpBox, d);
+                        RP.set(d);
+                    });
+
                     function closeAndRevert() {
                         syncFxUI(savedFx);
                         applyFx(savedFx);
@@ -4710,9 +5064,14 @@
                         HS.set(savedHeads);
                         BT.syncUI(btBox, savedBottom);
                         BT.set(savedBottom);
+                        RP.syncUI(rpBox, savedReading);
+                        RP.set(savedReading);
                         menuColors = savedMenuColors.slice();
                         renderColorRows(savedMenuColors);
                         applyMenuColors();
+                        menuHover = savedMenuHover;
+                        mhFill(savedMenuHover);
+                        applyMenuHover();
                         opacityPanel.removeClass("open");
                     }
 
@@ -4720,7 +5079,8 @@
                     $("#opacityPanelClose").on("click", closeAndRevert);
 
                     $("#opacitySaveBtn").on("click", function () {
-                        if (markInvalidColors()) {
+                        const badRows = markInvalidColors(), badHover = mhMarkInvalid();
+                        if (badRows || badHover) {
                             showToast("渐变色代码有误，请检查标红的输入框");
                             return;
                         }
@@ -4735,6 +5095,8 @@
                         menuColors = collectMenuColors();
                         savedMenuColors = menuColors.slice();
                         applyMenuColors();
+                        savedMenuHover = menuHover = mhCurrent();
+                        applyMenuHover();
 
                         savedFx = readFxUI();
                         applyFx(savedFx);
@@ -4743,7 +5105,9 @@
                         HS.set(savedHeads);
                         savedBottom = BT.readUI(btBox);
                         BT.set(savedBottom);
-                        if (saveUiSettings({ opacity: opacityVal, hideTime: hideTimeVal, menuColors: savedMenuColors, fx: savedFx, rippleCfg: savedRip, heads: savedHeads, bottomTimes: savedBottom })) {
+                        savedReading = RP.readUI(rpBox);
+                        RP.set(savedReading);
+                        if (saveUiSettings({ opacity: opacityVal, hideTime: hideTimeVal, menuColors: savedMenuColors, menuHover: savedMenuHover, fx: savedFx, rippleCfg: savedRip, heads: savedHeads, bottomTimes: savedBottom, reading: savedReading })) {
                             showToast("设置已保存 ✨");
                         }
                         opacityPanel.removeClass("open");
@@ -5069,7 +5433,7 @@
                             }
 
                             // 自定义背景视频存在 IndexedDB 里，localStorage.clear() 覆盖不到，需要单独清除
-                            idbDeleteBgVideo().finally(function () {
+                            Promise.all([Store.clearAll(), idbDeleteBgVideo().catch(function () { })]).finally(function () {
                                 showToast("已清除，正在刷新... 🧹");
                                 setTimeout(function () {
                                     location.reload();
@@ -5200,16 +5564,18 @@
                         showConfirmDialog(confirmMsg).then((ok) => {
                             if (!ok) return;
 
-                            const $target = $(target);
+                            // 用 ContentUndo.remove 代替 jQuery 的 .remove()：原样把元素摘下来并记住位置（事件和数据都保留），之后可以撤销恢复
+                            const U = window.ContentUndo;
+                            U.begin();
                             if (tag === "p") {
-                                const $parent = $target.parent();
-                                $target.remove();
+                                const parentEl = target.parentNode;
+                                U.remove(target);
                                 // 如果这是这张内容卡片里的最后一行，卡片本身（空的 div）也一并删除
-                                if ($parent.length && $parent.children("p").length === 0) {
-                                    $parent.remove();
+                                if (parentEl && parentEl.id !== "output" && $(parentEl).children("p").length === 0) {
+                                    U.remove(parentEl);
                                 }
                             } else {
-                                $target.remove();
+                                U.remove(target);
                             }
 
                             if (tag === "h3") {
@@ -5219,12 +5585,11 @@
                             // 先按真实内容快照持久化，再决定是否需要展示"暂无可显示内容"的提示，
                             // 避免提示文案本身被当成正文内容一起保存下来
                             persistCurrentOutput();
+                            U.commit("已删除 1 项 🗑️");
 
                             if (outputDiv.children().length === 0) {
                                 showDefaultPrompt();
                             }
-
-                            showToast("已删除 🗑️");
                         });
                     }
 
@@ -5327,26 +5692,27 @@
                         }
                         const count = selectedBatchItems.size;
                         showConfirmDialog(
-                            `确定要删除选中的 ${count} 项内容吗？此操作不可撤销。`,
+                            `确定要删除选中的 ${count} 项内容吗？（删除后可点底部的「撤销」，或按 Ctrl+Z 恢复）`,
                             "批量删除确认",
                             `删除 ${count} 项`
                         ).then((ok) => {
                             if (!ok) return;
 
                             let hasH3Deleted = false;
+                            const U = window.ContentUndo;
+                            U.begin();
                             selectedBatchItems.forEach((el) => {
-                                const $el = $(el);
                                 const tag = el.tagName.toLowerCase();
                                 if (tag === "h3") hasH3Deleted = true;
                                 if (tag === "p") {
-                                    const $parent = $el.parent();
-                                    $el.remove();
+                                    const parentEl = el.parentNode;
+                                    U.remove(el);
                                     // 如果这是这张内容卡片里的最后一行，卡片本身（空的 div）也一并删除
-                                    if ($parent.length && $parent.children("p").length === 0) {
-                                        $parent.remove();
+                                    if (parentEl && parentEl.id !== "output" && $(parentEl).children("p").length === 0) {
+                                        U.remove(parentEl);
                                     }
                                 } else {
-                                    $el.remove();
+                                    U.remove(el);
                                 }
                             });
                             selectedBatchItems.clear();
@@ -5355,12 +5721,12 @@
                             if (hasH3Deleted) rebuildH3List();
 
                             persistCurrentOutput();
+                            U.commit(`已删除 ${count} 项 🗑️`);
 
                             if (outputDiv.children().length === 0) {
                                 showDefaultPrompt();
                             }
 
-                            showToast(`已删除 ${count} 项 🗑️`);
                             exitBatchMode();
                         });
                     });
@@ -7503,6 +7869,24 @@
             color: var(--li-fg, #fff);
         }
 
+        /* 鼠标经过菜单按钮：用设置里选的渐变（没设置时 html 上没有 data-mh，沿用页面原本的粉橙渐变） */
+        html[data-mh] .menuLeft ul li:not(.highlight):hover {
+            background: var(--mh-bg);
+            color: var(--mh-fg, #fff);
+        }
+
+        #opacityPanel .mhSection { margin-top: 14px; padding-top: 12px; border-top: 1px dashed #d9d3f3; }
+        #opacityPanel .mhHead { margin: 0 0 8px; }
+        #opacityPanel .mhDemo { display: inline-block; padding: 6px 16px; border-radius: 10px; font-size: 13px; font-weight: 600; box-shadow: 0 2px 8px rgba(0, 0, 0, .25); transition: background .15s ease; }
+        #opacityPanel .mhGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); gap: 6px; margin: 0 0 8px; }
+        #opacityPanel .mhChip { height: 30px; min-width: 0; margin: 0; padding: 0 4px; border: 2px solid transparent; border-radius: 9px; font: inherit; font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; box-shadow: 0 1px 4px rgba(0, 0, 0, .2); transition: transform .12s ease, box-shadow .12s ease; }
+        #opacityPanel .mhChip:hover { transform: translateY(-1px); box-shadow: 0 3px 8px rgba(0, 0, 0, .3); }
+        #opacityPanel .mhChip.on { border-color: #fff; box-shadow: 0 0 0 2px #8b5cf6, 0 3px 10px rgba(139, 92, 246, .5); }
+        #opacityPanel .mhChipCustom { background: #fff; color: #5b3fd0; border: 1px dashed #a78bfa; }
+        #opacityPanel .mhChipCustom.on { border: 2px solid #fff; background: #efeaff; }
+        #opacityPanel .mhCustom { display: none; margin-bottom: 8px; }
+        #opacityPanel .mhCustom.isCustom { display: flex; }
+
         .menuColorRow {
             display: flex;
             flex-direction: column;
@@ -8470,6 +8854,98 @@ body.immersiveHidden #output>[data-anim],body.immersiveHidden #output>[data-anim
 #opacityPanel .btMenu::-webkit-scrollbar-thumb{background:rgba(124,111,209,.4);border-radius:3px}
 @supports not selector(::-webkit-scrollbar){#opacityPanel .btMenu{scrollbar-width:thin;scrollbar-color:rgba(124,111,209,.5) transparent}}
 </style>
+<style id="storeStyles">
+#opacityPanel .stInfo{margin:0 0 8px;padding:8px 12px;border-radius:10px;background:#f6f4ff;border:1px solid rgba(139,92,246,.16);font-size:12.5px;line-height:1.75;color:#46495e}
+#opacityPanel .stInfo b{color:#5b3fd0}
+#opacityPanel .stInfo .stWarn{color:#c2410c}
+#opacityPanel .stBar{height:6px;margin:6px 0 2px;border-radius:999px;background:#e7e3fa;overflow:hidden}
+#opacityPanel .stBar i{display:block;height:100%;min-width:2px;padding:0;border:0;border-radius:999px;background:linear-gradient(90deg,#6366f1,#a855f7)}
+</style>
+<style id="readingStyles">
+/* ===== 阅读设置：字号 / 行距（只在改过时才加类名；默认外观完全不变） ===== */
+html.readFs #output>div:not(.defaultPromptCard){font-size:calc(17px*var(--read-scale,1))}   /* 正文默认 17px */
+html.readFs #output>h3{font-size:calc(18.72px*var(--read-scale,1));   /* H3 默认 18.72px */
+height:auto;min-height:35px;line-height:calc(30px*var(--read-scale,1))}
+html.readFs #output>h4,html.readFs #output>h4[data-sub],html.readFs #output>h5,html.readFs #output>h6{font-size:calc(14px*var(--read-scale,1))!important}
+html.readFs #output>h5[data-sub]{font-size:calc(13px*var(--read-scale,1))!important}
+html.readLh #output>div:not(.defaultPromptCard) p{line-height:var(--read-lh)}
+/* 返回顶部按钮 */
+.backTopBtn{position:fixed;right:18px;bottom:56px;z-index:100040;display:flex;align-items:center;justify-content:center;width:42px;height:42px;margin:0;padding:0;border:0;border-radius:50%;
+ background:linear-gradient(135deg,#6366f1,#a855f7);color:#fff;font:inherit;font-size:18px;line-height:1;cursor:pointer;box-shadow:0 6px 18px rgba(80,50,180,.4);
+ opacity:0;transform:translateY(12px) scale(.9);pointer-events:none;transition:opacity .2s,transform .2s,filter .15s}
+.backTopBtn.show{opacity:1;transform:none;pointer-events:auto}
+.backTopBtn:hover{filter:brightness(1.12)}
+.backTopBtn em{font-style:normal;padding:0}
+body.imgViewerOpen .backTopBtn{display:none}
+@media (prefers-reduced-motion:reduce){.backTopBtn{transition:none}}
+/* 设置面板 · 阅读选项卡 */
+#opacityPanel .rpFs{display:flex;align-items:center;gap:10px;margin:0 0 8px}
+#opacityPanel .rpFsRange{flex:1;min-width:0;margin:0;accent-color:#8b5cf6;cursor:pointer}
+#opacityPanel .rpFsVal{flex:none;min-width:46px;text-align:right;font-style:normal;padding:0;font-size:13px;font-weight:700;color:#5b3fd0;font-variant-numeric:tabular-nums}
+#opacityPanel .rpMini{flex:none;margin:0;padding:3px 10px;border:1px solid #d3d8ea;border-radius:999px;background:#fff;color:#46495e;font:inherit;font-size:12px;cursor:pointer}
+#opacityPanel .rpMini:hover{border-color:#a78bfa;background:#faf8ff}
+/* 界面选项卡：透明度 + 沉浸模式并排一行；下面接着是阅读设置 */
+#opacityPanel .uiTwoCol{display:flex;align-items:flex-start;gap:18px}
+#opacityPanel .uiCol{flex:1;min-width:0}
+#opacityPanel .uiCol>label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#opacityPanel .uiCol .hideTimeRow{flex-wrap:wrap;row-gap:4px}
+@media (max-width:440px){#opacityPanel .uiTwoCol{flex-direction:column;gap:12px}#opacityPanel .uiCol{width:100%}}
+#opacityPanel .rdSection{margin-top:2px;padding-top:12px;border-top:1px dashed #d9d3f3}
+#opacityPanel .rcPresets{margin:0 0 10px}
+#opacityPanel .rcPre{display:inline-flex;align-items:center;gap:6px}
+#opacityPanel .rcSw{display:inline-block;width:16px;height:16px;padding:0;border-radius:5px;border:2px solid #ccc;box-sizing:border-box;flex:none}
+#opacityPanel .rcRow{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:0 0 8px}
+#opacityPanel .rcLab{flex:none;width:74px;font-style:normal;padding:0;font-size:13px;color:#46495e}
+#opacityPanel .rcLab2{width:auto;margin-left:6px}
+#opacityPanel .rcIn[type="color"],#opacityPanel .hvIn[type="color"]{flex:none;width:34px;height:28px;margin:0;padding:1px;border:1px solid #cdd3e0;border-radius:8px;background:#fff;cursor:pointer}
+#opacityPanel .rcIn[type="color"]:disabled,#opacityPanel .hvIn[type="color"]:disabled{opacity:.4;cursor:not-allowed}
+#opacityPanel .rcIn[type="range"],#opacityPanel .hvIn[type="range"]{width:100%;min-width:0;margin:0;accent-color:#8b5cf6;cursor:pointer}
+#opacityPanel .rcDirRow{align-items:flex-start;gap:12px}
+#opacityPanel .rcDir{flex:none;display:grid;grid-template-columns:repeat(3,34px);gap:4px}
+#opacityPanel .rcDirBtn,#opacityPanel .hvDirBtn{width:34px;height:34px;margin:0;padding:0;border:1px solid #d3d8ea;border-radius:9px;background:#fff;color:#46495e;font:inherit;font-size:16px;line-height:1;cursor:pointer;transition:background .12s,border-color .12s,color .12s}
+#opacityPanel .rcDirBtn:hover,#opacityPanel .hvDirBtn:hover{border-color:#a78bfa;background:#faf8ff}
+#opacityPanel .rcDirBtn.on,#opacityPanel .hvDirBtn.on{border-color:transparent;color:#fff;background:linear-gradient(135deg,#6366f1,#a855f7)}
+#opacityPanel .rcDir .rcAngVal{display:flex;align-items:center;justify-content:center;width:34px;height:34px;padding:0;font-style:normal;font-size:10.5px;font-weight:700;color:#5b3fd0;font-variant-numeric:tabular-nums}
+#opacityPanel .rcDirSide{flex:1;min-width:0;align-self:center}
+#opacityPanel .rcHint{margin-top:4px;font-size:11px;line-height:1.5;color:#8a90a6}
+#opacityPanel .rcChk{display:inline-flex!important;align-items:center;gap:4px;margin:0!important;font-size:12.5px;color:#46495e;cursor:pointer}
+#opacityPanel .rcChk input{width:15px;height:15px;margin:0;accent-color:#8b5cf6}
+#opacityPanel .rcChk span{padding:0;display:inline;border:0}
+#opacityPanel .rcSample{margin:2px 0 12px;padding:10px 12px;border-radius:10px;background:#c9ccd6}
+#opacityPanel .hvCard{padding:3px;border-radius:12px;font-size:14px;line-height:1.6;background:#fff;box-shadow:0 2px 6px rgba(20,30,60,.2)}
+#opacityPanel .hvCard p{margin:0;padding:5px 10px;font-size:14px;color:#222;border-radius:5px}
+#opacityPanel .hvCard p:not(:last-child){border-bottom:1px solid rgba(60,80,120,.22)}
+#opacityPanel .hvGrid{margin:0 0 10px}
+#opacityPanel .rcCard{padding:3px;border-left:3px solid transparent;border-radius:12px;font-size:14px;line-height:1.6;box-shadow:0 2px 6px rgba(20,30,60,.2)}
+#opacityPanel .rcCard p{margin:0;padding:5px 10px;font-size:14px}
+#opacityPanel .rcCard p:not(:last-child){border-bottom:1px solid rgba(60,80,120,.22)}
+#opacityPanel .rpSample{margin:0 0 12px;padding:8px 12px;border-radius:10px;background:#f6f4ff;border:1px dashed #cfc8ee;color:#2a2750;overflow:hidden}
+</style>
+<style id="undoShortcutStyles">
+/* 撤销提示条 */
+.undoBar{position:fixed;left:50%;bottom:56px;transform:translate(-50%,16px);z-index:100070;display:flex;align-items:center;gap:14px;max-width:92vw;
+ padding:9px 10px 9px 18px;border-radius:999px;background:rgba(32,26,68,.95);color:#fff;font-size:13.5px;box-shadow:0 10px 30px rgba(20,12,60,.42);
+ opacity:0;pointer-events:none;transition:opacity .2s,transform .2s}
+.undoBar.show{opacity:1;transform:translate(-50%,0);pointer-events:auto}
+.undoBar .ubMsg{font-style:normal;padding:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.undoBar .ubBtn{flex:none;margin:0;padding:6px 14px;border:0;border-radius:999px;background:linear-gradient(135deg,#6366f1,#a855f7);color:#fff;font:inherit;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap}
+.undoBar .ubBtn:hover{filter:brightness(1.12)}
+@media (prefers-reduced-motion:reduce){.undoBar{transition:none}}
+/* 快捷键帮助 */
+.kbHelp{position:fixed;inset:0;z-index:100080;display:none;align-items:center;justify-content:center;background:rgba(20,14,50,.45)}
+.kbHelp.show{display:flex}
+.kbCard{width:min(92vw,420px);max-height:86vh;overflow-y:auto;padding:16px 18px 14px;border-radius:16px;background:#fff;color:#2a2750;box-shadow:0 20px 50px rgba(20,12,60,.45)}
+.kbHead{display:flex;align-items:center;justify-content:space-between;margin:0 0 10px;font-size:16px;font-weight:700}
+.kbHead em{font-style:normal;padding:0}
+.kbClose{margin:0;width:28px;height:28px;padding:0;border:0;border-radius:50%;background:#efeaff;color:#5b3fd0;font:inherit;font-size:18px;line-height:28px;cursor:pointer}
+.kbRow{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:6px 0;border-bottom:1px dashed #e6e3f7;font-size:13.5px}
+.kbRow em{font-style:normal;padding:0}
+.kbRow .kbKeys{flex:none;display:flex;gap:4px;align-items:center;white-space:nowrap}
+.kbRow kbd{display:inline-block;min-width:22px;padding:2px 7px;border:1px solid #cfc8ee;border-bottom-width:2px;border-radius:6px;background:#f7f5ff;color:#4b3aa8;font:600 12px/1.4 inherit;text-align:center}
+.kbToggle{display:flex;align-items:center;gap:8px;margin:12px 0 4px;font-size:13px;cursor:pointer}
+.kbToggle input{width:16px;height:16px;margin:0;accent-color:#8b5cf6}
+.kbNote{font-size:11.5px;color:#8a90a6;line-height:1.5}
+</style>
 <style id="offscreenPause">
 /* ===== 性能优化：内容区里滚出屏幕的块（含小标题 h4/h5、高亮块）暂停动画，进入屏幕再恢复 =====
    用 data-off 属性而不是 class，避免触发图片名称层对 class 变化的监听 */
@@ -8954,22 +9430,33 @@ html.fx-no-breath #h3List li.highlight::after {
         </div>
         <div class="addTabContent">
             <div class="settingRow setTabPane active" data-stab="ui">
-                <label>整体透明度：<span id="opacityValueLabel">100%</span></label>
-                <input type="range" id="opacitySlider" min="20" max="100" value="100" />
-            </div>
-            <div class="settingRow setTabPane active" data-stab="ui">
-                <label>无操作后自动隐藏顶部工具栏和左侧菜单（沉浸模式）</label>
-                <div class="hideTimeRow">
-                    <input type="number" id="hideTimeInput" min="0" placeholder="0" />
-                    <span>秒（0 = 不自动隐藏）</span>
+                <div class="uiTwoCol">
+                    <div class="uiCol">
+                        <label>整体透明度：<span id="opacityValueLabel">100%</span></label>
+                        <input type="range" id="opacitySlider" min="20" max="100" value="100" />
+                    </div>
+                    <div class="uiCol">
+                        <label title="无操作后自动隐藏顶部工具栏和左侧菜单">沉浸模式（无操作自动隐藏）</label>
+                        <div class="hideTimeRow">
+                            <input type="number" id="hideTimeInput" min="0" placeholder="0" />
+                            <span>秒（0 = 不隐藏）</span>
+                        </div>
+                    </div>
                 </div>
             </div>
             <div class="settingRow setTabPane" data-stab="menu">
-                <label>🎨 左侧菜单颜色（按序号设置，可选 4 种默认配色，或自定义 3 色渐变；后面的规则会覆盖前面的；未设置的保持原来的配色）</label>
+                <label>🎨 左侧菜单颜色（按序号设置，可选 11 种预设配色，或自定义 3 色渐变；后面的规则会覆盖前面的；未设置的保持原来的配色）</label>
                 <div id="menuColorList"></div>
                 <div class="panelBtnRow">
                     <button class="panelBtn secondaryBtn" id="menuColorAddBtn" type="button">➕ 添加区间</button>
                     <button class="panelBtn secondaryBtn" id="menuColorClearBtn" type="button">恢复默认色</button>
+                </div>
+                <div class="mhSection">
+                    <label>🖱️ 鼠标经过的样式（对所有菜单按钮生效，24 种渐变任选，也可自定义；选中的按钮保持原样；修改后立即预览，点「保存设置」才会保留）</label>
+                    <div id="menuHoverBox"></div>
+                    <div class="panelBtnRow">
+                        <button class="panelBtn secondaryBtn" id="menuHoverResetBtn" type="button">恢复默认悬停色</button>
+                    </div>
                 </div>
             </div>
             <div class="settingRow setTabPane" data-stab="fx">
@@ -9043,6 +9530,13 @@ html.fx-no-breath #h3List li.highlight::after {
                     <button class="panelBtn secondaryBtn" id="hdResetBtn" type="button">恢复默认</button>
                 </div>
             </div>
+            <div class="settingRow setTabPane active rdSection" data-stab="ui">
+                <label>📖 阅读（字号、行距、卡片颜色、阅读位置；修改后立即预览，点「保存设置」才会保留）</label>
+                <div id="rpBox"></div>
+                <div class="panelBtnRow">
+                    <button class="panelBtn secondaryBtn" id="rpResetBtn" type="button">恢复阅读默认</button>
+                </div>
+            </div>
             <div class="settingRow setTabPane" data-stab="time">
                 <label>🕐 底部时间栏（选择显示几栏，以及每一栏显示哪个国家 / 地区的时间；修改后立即预览，点「保存设置」才会保留）</label>
                 <div id="btBox"></div>
@@ -9063,6 +9557,27 @@ html.fx-no-breath #h3List li.highlight::after {
                     <button class="panelBtn secondaryBtn" id="autoBackupNowBtn" type="button">⬇️ 立即备份</button>
                 </div>
                 <div class="mcHint" style="margin-top:6px;font-size:11px;line-height:1.5;color:#8a90a6;">需在当月打开过本页面才会执行；已选好备份文件时，文件名以所选文件为准。</div>
+            </div>
+            <div class="settingRow setTabPane" data-stab="backup">
+                <label>🗄️ 存储空间</label>
+                <div class="stInfo" id="storeInfo">读取中…</div>
+                <div class="panelBtnRow">
+                    <button class="panelBtn secondaryBtn" id="storePersistBtn" type="button" style="display:none">🔒 申请持久存储</button>
+                </div>
+                <div class="mcHint" style="margin-top:4px;font-size:11px;line-height:1.5;color:#8a90a6;">内容和自定义背景存在浏览器的 IndexedDB 里，容量比以前的 localStorage（约 5MB）大得多。清除浏览器数据仍会一并清掉，重要内容请定期用「导入/出」或自动备份保存。</div>
+            </div>
+            <div class="settingRow setTabPane" data-stab="backup">
+                <label>⚙️ 设置备份</label>
+                <div class="mcHint" style="margin:0 0 8px;font-size:11px;line-height:1.5;color:#8a90a6;">把界面设置导出成文件；清除浏览器数据或换电脑后，导入即可一键恢复。导出的是<b>已保存</b>的设置（点过「保存设置」的）。</div>
+                <div class="panelBtnRow">
+                    <button class="panelBtn secondaryBtn" id="settingsExportBtn" type="button">📤 导出设置</button>
+                    <button class="panelBtn secondaryBtn" id="settingsImportBtn" type="button">📥 导入设置</button>
+                </div>
+                <input type="file" id="settingsImportFile" accept=".json,application/json" style="display:none" />
+                <div class="mcHint" style="margin-top:6px;font-size:11px;line-height:1.6;color:#8a90a6;">
+                    包含：透明度与沉浸模式、菜单颜色、特效开关、点击波纹、标题样式与动效、阅读设置（字号 / 行距 / 卡片颜色 / 返回顶部）、底部时间栏、顶部时区、自动备份的开关与文件名、网络地址的背景。<br>
+                    不包含：页面内容（请用上面的自动备份或「导入/出」）、本地上传的背景图 / 视频。
+                </div>
             </div>
             <button class="panelBtn" id="opacitySaveBtn" type="button" style="width:100%;">✅ 保存设置</button>
         </div>
@@ -9697,6 +10212,872 @@ window.syncBgVideo();
             tip("当前浏览器不支持拖拽导入，请点击选择文件");
         }
     });
+})();
+</script>
+<script id="settingsBackupScript">
+/* 设置备份：把界面设置导出成 .json，或从 .json 导入恢复（导入后自动刷新页面生效） */
+(function () {
+    var KEY_UI = "uiSettings", KEY_TZ = "toolbarSelectedTimeZoneId", KEY_AB = "autoBackupCfg", KEY_BG = "customBackground";
+    var exportBtn = document.getElementById("settingsExportBtn"), importBtn = document.getElementById("settingsImportBtn"), fileInput = document.getElementById("settingsImportFile");
+    if (!exportBtn || !importBtn || !fileInput) return;
+    function tip(m) { if (typeof showToastGlobal === "function") showToastGlobal(m); else alert(m); }
+    function readJson(k) { try { var r = localStorage.getItem(k); return r ? JSON.parse(r) : null; } catch (e) { return null; } }
+    function pad(n) { return ("0" + n).slice(-2); }
+    function today() { var d = new Date(); return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()); }
+
+    /* ---------- 导出 ---------- */
+    exportBtn.addEventListener("click", function () {
+        var data = {}, skippedBg = false;
+        var ui = readJson(KEY_UI); if (ui && typeof ui === "object") data.uiSettings = ui;
+        var tz = null; try { tz = localStorage.getItem(KEY_TZ); } catch (e) { }
+        if (tz) data.toolbarTimeZone = tz;
+        var ab = readJson(KEY_AB); if (ab && typeof ab === "object") data.autoBackup = { enabled: !!ab.enabled, name: String(ab.name || "") };
+        var bg = null; try { var bgRaw = window.Store ? Store.get(KEY_BG) : null; bg = bgRaw ? JSON.parse(bgRaw) : null; } catch (e) { }
+        if (bg && typeof bg === "object") {
+            if (bg.source === "url" && typeof bg.src === "string") data.customBackground = bg; else skippedBg = true;
+        }
+        if (!Object.keys(data).length) { tip("还没有保存过任何设置，没有可导出的内容"); return; }
+        var payload = { app: "txt-reader-settings", version: 1, exportedAt: new Date().toISOString(), data: data };
+        var blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+        var a = document.createElement("a");
+        a.href = URL.createObjectURL(blob); a.download = "界面设置备份-" + today() + ".json";
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+        tip(skippedBg ? "设置已导出（本地上传的背景不包含在内）" : "设置已导出 ✅");
+    });
+
+    /* ---------- 导入 ---------- */
+    importBtn.addEventListener("click", function () { fileInput.value = ""; fileInput.click(); });
+
+    // 只保留普通的数字 / 文字 / 布尔 / 数组 / 对象，限制层级与长度，丢掉其他东西
+    function clean(v, depth) {
+        if (v === null) return null;
+        var t = typeof v;
+        if (t === "number") return isFinite(v) ? v : 0;
+        if (t === "boolean") return v;
+        if (t === "string") return v.slice(0, 2000);
+        if (depth <= 0) return undefined;
+        if (Array.isArray(v)) return v.slice(0, 100).map(function (x) { return clean(x, depth - 1); }).filter(function (x) { return x !== undefined; });
+        if (t === "object") {
+            var o = {};
+            Object.keys(v).slice(0, 100).forEach(function (k) {
+                if (k === "__proto__" || k === "constructor" || k === "prototype") return;
+                var c = clean(v[k], depth - 1);
+                if (c !== undefined) o[k] = c;
+            });
+            return o;
+        }
+        return undefined;
+    }
+    function isObj(x) { return x && typeof x === "object" && !Array.isArray(x); }
+
+    function parseSettings(text) {
+        var obj;
+        try { obj = JSON.parse(text); } catch (e) { return { error: "这不是有效的设置文件（无法解析）" }; }
+        if (!isObj(obj) || obj.app !== "txt-reader-settings" || !isObj(obj.data)) return { error: "这不是设置备份文件。内容文件请用「导入/出」导入" };
+        if (Number(obj.version) > 1) return { error: "这个设置文件来自更新的版本，当前页面无法识别" };
+        var d = obj.data, out = {}, items = [];
+        if (isObj(d.uiSettings)) {
+            var raw = clean(d.uiSettings, 5), ui = {};
+            ["opacity", "hideTime", "menuColors", "menuHover", "fx", "rippleCfg", "heads", "bottomTimes", "reading"].forEach(function (k) { if (k in raw) ui[k] = raw[k]; });   // 只保留已知字段
+            if (typeof ui.opacity === "number") ui.opacity = Math.min(100, Math.max(20, ui.opacity)); else delete ui.opacity;
+            if (typeof ui.hideTime === "number") ui.hideTime = Math.max(0, ui.hideTime); else delete ui.hideTime;
+            if (Array.isArray(ui.menuColors)) ui.menuColors = ui.menuColors.filter(isObj); else delete ui.menuColors;
+            if (!isObj(ui.menuHover)) delete ui.menuHover;
+            ["fx", "rippleCfg", "heads", "bottomTimes", "reading"].forEach(function (k) { if (!isObj(ui[k])) delete ui[k]; });
+            out.uiSettings = ui; items.push("界面与特效设置");
+            if (ui.heads) items.push("标题样式");
+            if (ui.bottomTimes) items.push("底部时间栏");
+            if (ui.reading) items.push("阅读设置");
+        }
+        if (typeof d.toolbarTimeZone === "string" && d.toolbarTimeZone.length <= 40) { out.toolbarTimeZone = d.toolbarTimeZone; items.push("顶部时区"); }
+        if (isObj(d.autoBackup)) {
+            out.autoBackup = { enabled: !!d.autoBackup.enabled, name: String(d.autoBackup.name || "").slice(0, 80) };
+            items.push("自动备份设置");
+        }
+        if (isObj(d.customBackground) && d.customBackground.source === "url" && typeof d.customBackground.src === "string" && /^https?:\/\//i.test(d.customBackground.src)) {
+            out.customBackground = clean(d.customBackground, 3); items.push("网络背景");
+        }
+        if (!items.length) return { error: "文件里没有可导入的设置" };
+        return { out: out, items: items };
+    }
+
+    fileInput.addEventListener("change", function () {
+        var f = fileInput.files && fileInput.files[0];
+        if (!f) return;
+        if (f.size > 2 * 1024 * 1024) { tip("文件太大，不像是设置备份文件"); return; }
+        var r = new FileReader();
+        r.onload = function () {
+            var res = parseSettings(String(r.result || ""));
+            if (res.error) { tip(res.error); return; }
+            if (!confirm("将导入以下设置：\n· " + res.items.join("\n· ") + "\n\n会覆盖当前对应的设置，并刷新页面使其生效。页面内容不受影响。是否继续？")) return;
+            try {
+                var o = res.out;
+                if (o.uiSettings) localStorage.setItem(KEY_UI, JSON.stringify(o.uiSettings));
+                if (o.toolbarTimeZone) localStorage.setItem(KEY_TZ, o.toolbarTimeZone);
+                if (o.autoBackup) {
+                    var cur = readJson(KEY_AB) || {};   // 保留本机的“上次备份时间、备份文件”等，只覆盖开关和文件名
+                    cur.enabled = o.autoBackup.enabled; cur.name = o.autoBackup.name;
+                    localStorage.setItem(KEY_AB, JSON.stringify(cur));
+                }
+                if (o.customBackground) Store.set(KEY_BG, JSON.stringify(o.customBackground));
+            } catch (e) { tip("⚠️ 写入失败（浏览器存储空间不足？），设置未能完整导入"); return; }
+            Store.whenIdle().then(function () { location.reload(); });   // 等背景等数据写进 IndexedDB 后再刷新
+        };
+        r.onerror = function () { tip("读取文件失败"); };
+        r.readAsText(f);
+    });
+})();
+</script>
+<script id="contentUndoScript">
+/* 撤销 / 重做（删除、新增、插入、修改）+ 快捷键 */
+(function () {
+    var out = document.getElementById("output");
+    if (!out) return;
+    var undoStack = [], redoStack = [], cur = null, bar = null, hideTimer = 0;
+
+    /* ---------- 底部提示条 ---------- */
+    function arm(ms) { clearTimeout(hideTimer); hideTimer = setTimeout(function () { if (bar) bar.classList.remove("show"); }, ms); }
+    function showBar(msg, act, btnText, ms) {
+        if (!bar) {
+            bar = document.createElement("div");
+            bar.className = "undoBar"; bar.setAttribute("role", "status");
+            bar.innerHTML = '<em class="ubMsg"></em><button type="button" class="ubBtn"></button>';
+            document.body.appendChild(bar);
+            bar.querySelector(".ubBtn").addEventListener("click", function () {
+                var a = bar.getAttribute("data-act");
+                if (a === "undo") api.undo(); else if (a === "redo") api.redo();
+            });
+            bar.addEventListener("mouseenter", function () { clearTimeout(hideTimer); });
+            bar.addEventListener("mouseleave", function () { arm(2500); });
+        }
+        bar.querySelector(".ubMsg").textContent = msg;
+        var btn = bar.querySelector(".ubBtn");
+        if (act) { btn.style.display = ""; btn.textContent = btnText; bar.setAttribute("data-act", act); }
+        else { btn.style.display = "none"; bar.removeAttribute("data-act"); }
+        bar.classList.add("show");
+        arm(ms || 8000);
+    }
+
+    /* ---------- 撤销 / 重做之后：更新目录并保存 ---------- */
+    function finish() {
+        if (window.rebuildH3ListGlobal) window.rebuildH3ListGlobal();
+        // 内容被删光时页面显示的“使用说明”不是真实内容：保存前先摘下来，保存后放回去
+        var pc = out.querySelector(":scope > div.defaultPromptCard"), nx = pc ? pc.nextSibling : null;
+        if (pc) out.removeChild(pc);
+        if (window.persistOutputGlobal) window.persistOutputGlobal();
+        if (pc) out.insertBefore(pc, nx);
+    }
+    function scrollIfHidden(el) {
+        if (el && el.nodeType === 3) el = el.parentNode;
+        if (el && el.getBoundingClientRect) {
+            var r = el.getBoundingClientRect();
+            if (r.bottom < 0 || r.top > window.innerHeight) el.scrollIntoView({ block: "center", behavior: "smooth" });
+        }
+    }
+    function pushRec(rec, label) {
+        undoStack.push(rec); if (undoStack.length > 30) undoStack.shift();
+        redoStack.length = 0;
+        showBar(label, "undo", "↩ 撤销 (Ctrl+Z)", 8000);
+    }
+
+    var api = window.ContentUndo = {
+        /* ----- 删除：begin → remove(多个) → commit ----- */
+        begin: function () { cur = []; },
+        remove: function (el) {
+            if (!el || !el.parentNode) return;
+            if (cur) cur.push({ el: el, parent: el.parentNode, prev: el.previousSibling, next: el.nextSibling });
+            el.parentNode.removeChild(el);   // 原生摘除：保留元素上的事件和数据，恢复后功能照旧
+        },
+        commit: function (label) {
+            var entries = cur; cur = null;
+            if (!entries || !entries.length) return;
+            pushRec({
+                first: entries[0].el,
+                undo: function () {
+                    var prompt = out.querySelector(":scope > div.defaultPromptCard");   // 内容被删光后显示的“使用说明”，先拿掉
+                    if (prompt) out.removeChild(prompt);
+                    var failed = 0;
+                    for (var i = entries.length - 1; i >= 0; i--) {
+                        var e = entries[i];
+                        if (!(e.parent === out || out.contains(e.parent))) { failed++; continue; }
+                        if (e.next && e.next.parentNode === e.parent) e.parent.insertBefore(e.el, e.next);
+                        else if (e.prev && e.prev.parentNode === e.parent) e.parent.insertBefore(e.el, e.prev.nextSibling);
+                        else e.parent.appendChild(e.el);
+                        if (e.el.classList) e.el.classList.remove("batchSelected");
+                    }
+                    return failed === entries.length ? -1 : failed;
+                },
+                redo: function () { entries.forEach(function (e) { if (e.el.parentNode) e.el.parentNode.removeChild(e.el); }); return 0; }
+            }, label);
+        },
+
+        /* ----- 撤销 / 重做 ----- */
+        undo: function () {
+            var rec = undoStack.pop();
+            if (!rec) { showBar("没有可撤销的操作", null, null, 1800); return false; }
+            var failed = rec.undo();
+            finish();
+            if (failed < 0) { showBar("内容已变化，无法撤销", null, null, 2500); return false; }
+            redoStack.push(rec);
+            showBar(failed ? "已部分恢复（有 " + failed + " 项因内容变化无法恢复）" : "已撤销 ✅", "redo", "↪ 重做", 5000);
+            scrollIfHidden(rec.first);
+            return true;
+        },
+        redo: function () {
+            var rec = redoStack.pop();
+            if (!rec) { showBar("没有可重做的操作", null, null, 1800); return false; }
+            rec.redo();
+            finish();
+            if (!out.children.length && typeof showDefaultPrompt === "function") showDefaultPrompt();
+            undoStack.push(rec);
+            showBar("已重做 ✅", "undo", "↩ 撤销 (Ctrl+Z)", 8000);
+            scrollIfHidden(rec.first);
+            return true;
+        }
+    };
+
+    /* ---------- 新增 / 插入 / 修改：用 DOM 变化记录自动生成撤销步骤 ---------- */
+    // 只在下面这些按钮被点击的那一瞬间“开始记录”，处理完立即收尾；平时观察到的变化一律丢弃
+    var AUTO = { addContentBtn: "已添加内容 ✨", addH3Btn: "已添加大标题 ✨", addH4Btn: "已添加小标题 ✨", confirmAddImagesBtn: "已添加图片 ✨", editSaveBtn: "已保存修改 ✏️" };
+    var txn = null;
+    var obs = new MutationObserver(function (recs) { if (txn) for (var i = 0; i < recs.length; i++) txn.records.push(recs[i]); });
+    obs.observe(out, { childList: true, subtree: true, characterData: true, characterDataOldValue: true, attributes: true, attributeFilter: ["src", "data-name"], attributeOldValue: true });
+
+    function nodeIn(n) { return n && n.parentNode; }
+    function undoRecord(r) {
+        if (r.type === "childList") {
+            Array.prototype.forEach.call(r.addedNodes, function (n) { if (n.parentNode === r.target) r.target.removeChild(n); });
+            var ref = (r.nextSibling && r.nextSibling.parentNode === r.target) ? r.nextSibling
+                : ((r.previousSibling && r.previousSibling.parentNode === r.target) ? r.previousSibling.nextSibling : null);
+            Array.prototype.forEach.call(r.removedNodes, function (n) { r.target.insertBefore(n, ref); });
+        } else if (r.type === "characterData") {
+            r.target.data = r.oldValue;
+        } else if (r.type === "attributes") {
+            if (r.oldValue === null) r.target.removeAttribute(r.attributeName); else r.target.setAttribute(r.attributeName, r.oldValue);
+        }
+    }
+    function redoRecord(r) {
+        if (r.type === "childList") {
+            Array.prototype.forEach.call(r.removedNodes, function (n) { if (n.parentNode === r.target) r.target.removeChild(n); });
+            var ref = (r.nextSibling && r.nextSibling.parentNode === r.target) ? r.nextSibling : null;
+            Array.prototype.forEach.call(r.addedNodes, function (n) { r.target.insertBefore(n, ref); });
+        } else if (r.type === "characterData") {
+            r.target.data = r.newValue;
+        } else if (r.type === "attributes") {
+            if (r.newValue === null || r.newValue === undefined) r.target.removeAttribute(r.attributeName); else r.target.setAttribute(r.attributeName, r.newValue);
+        }
+    }
+    function finishAuto() {
+        var t = txn; txn = null;
+        if (!t) return;
+        var recs = t.records;
+        if (!recs.length) return;
+        // 重做需要“修改之后的值”：同一个节点 / 属性，后一条记录的旧值就是前一条的新值；最后一条取当前值
+        var laterCd = new Map(), laterAttr = new Map();
+        for (var i = recs.length - 1; i >= 0; i--) {
+            var r = recs[i];
+            if (r.type === "characterData") {
+                r.newValue = laterCd.has(r.target) ? laterCd.get(r.target) : r.target.data;
+                laterCd.set(r.target, r.oldValue);
+            } else if (r.type === "attributes") {
+                var k = r.attributeName, m = laterAttr.get(r.target) || {};
+                r.newValue = (k in m) ? m[k] : r.target.getAttribute(k);
+                m[k] = r.oldValue; laterAttr.set(r.target, m);
+            }
+        }
+        var first = null;
+        for (var j = 0; j < recs.length && !first; j++) {
+            if (recs[j].type === "childList" && recs[j].addedNodes.length) first = recs[j].addedNodes[0];
+            else if (recs[j].type !== "childList") first = recs[j].target;
+        }
+        pushRec({
+            first: first,
+            undo: function () {
+                for (var x = recs.length - 1; x >= 0; x--) undoRecord(recs[x]);
+                return 0;
+            },
+            redo: function () { for (var y = 0; y < recs.length; y++) redoRecord(recs[y]); return 0; }
+        }, t.label);
+    }
+    document.addEventListener("click", function (e) {
+        var b = e.target.closest ? e.target.closest("button") : null;
+        if (!b || !AUTO[b.id] || txn) return;
+        obs.takeRecords();
+        txn = { label: AUTO[b.id], records: [] };
+        setTimeout(finishAuto, 0);   // 页面自己的点击处理是同步的，等它们跑完再收尾
+    }, true);
+
+    /* ---------- 快捷键 ---------- */
+    var KB_KEY = "kbShortcuts";
+    function kbOn() { try { return localStorage.getItem(KB_KEY) !== "0"; } catch (e) { return true; } }
+    function typing(t) { return !!(t && t.tagName && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable)); }
+    function shown(sel) { var e = document.querySelector(sel); return !!e && getComputedStyle(e).display !== "none"; }
+    function modalOpen() {
+        return shown("#confirmDialog.open") || shown("#ctxMenu") || document.body.classList.contains("batchMode") ||
+            document.body.classList.contains("imgViewerOpen") || (document.getElementById("kbHelp") || {}).classList && document.getElementById("kbHelp").classList.contains("show");
+    }
+
+    var help = null;
+    function buildHelp() {
+        help = document.createElement("div"); help.id = "kbHelp"; help.className = "kbHelp";
+        var rows = [
+            [["Ctrl / ⌘", "Z"], "撤销上一次删除 / 新增 / 修改"], [["Ctrl / ⌘", "Shift", "Z"], "重做（也可用 Ctrl+Y）"], [["Esc"], "关闭面板 / 下拉 / 退出批量删除"],
+            [["N"], "新增内容"], [["B"], "背景设置"], [["S"], "设置"], [["I"], "导入 / 导出"], [["T"], "切换时区（可直接搜索）"], [["H"], "隐藏 / 显示工具栏"], [["?"], "显示这个帮助"]
+        ].map(function (r) {
+            return '<div class="kbRow"><em class="kbKeys">' + r[0].map(function (k) { return "<kbd>" + k + "</kbd>"; }).join("") + '</em><em class="kbDesc">' + r[1] + "</em></div>";
+        }).join("");
+        help.innerHTML = '<div class="kbCard" role="dialog" aria-modal="true" aria-label="快捷键"><div class="kbHead"><em>⌨️ 快捷键</em><button type="button" class="kbClose" aria-label="关闭">×</button></div>' + rows +
+            '<label class="kbToggle"><input type="checkbox" id="kbEnable" /> <em style="font-style:normal;padding:0">启用单键快捷键（N / B / S / I / T / H）</em></label>' +
+            '<div class="kbNote">撤销、重做、Esc 和 ? 不受这个开关影响；在输入框里打字时，单键快捷键不会触发。</div></div>';
+        document.body.appendChild(help);
+        help.addEventListener("click", function (e) { if (e.target === help || (e.target.closest && e.target.closest(".kbClose"))) closeHelp(); });
+        help.querySelector("#kbEnable").addEventListener("change", function () { try { localStorage.setItem(KB_KEY, this.checked ? "1" : "0"); } catch (e) { } });
+    }
+    function openHelp() { if (!help) buildHelp(); help.querySelector("#kbEnable").checked = kbOn(); help.classList.add("show"); }
+    function closeHelp() { if (help) help.classList.remove("show"); }
+
+    var KEYMAP = { n: "#btnAdd", b: "#btnBg", s: "#btnOpacity", i: "#btnBtn4", t: "#toolbarTime", h: "#myElement" };
+    // 捕获阶段监听：先于页面里其它 Esc 处理判断“该由谁来处理”，避免一次 Esc 同时关掉多层
+    window.addEventListener("keydown", function (e) {
+        if (e.isComposing) return;
+        var k = e.key, mod = e.ctrlKey || e.metaKey, t = e.target, ty = typing(t);
+        if (mod && !e.altKey && /^[zZyY]$/.test(k)) {
+            if (ty) return;                      // 输入框里保留浏览器自带的撤销
+            if (modalOpen()) return;
+            e.preventDefault();
+            if (/^[yY]$/.test(k) || e.shiftKey) api.redo(); else api.undo();
+            return;
+        }
+        if (mod || e.altKey) return;
+        if (k === "Escape") {
+            if (help && help.classList.contains("show")) { e.preventDefault(); closeHelp(); return; }   // 帮助面板里的勾选框有焦点时也能用 Esc 关
+            if (ty) return;                      // 输入框里按 Esc 交给输入框自己处理，避免丢掉正在输入的内容
+            if (shown("#confirmDialog.open") || shown("#ctxMenu") || document.body.classList.contains("batchMode") || document.body.classList.contains("imgViewerOpen")) return;
+            var td = document.getElementById("timeDropdown");
+            if (td && td.classList.contains("open")) { td.classList.remove("open"); return; }
+            if (document.querySelector(".btDd.open")) return;
+            var closeBtn = document.querySelector(".addPanel.open .addPanelClose");
+            if (closeBtn) closeBtn.click();
+            return;
+        }
+        if (ty || e.repeat) return;
+        if (k === "?") { e.preventDefault(); openHelp(); return; }
+        if (!kbOn() || modalOpen() || document.querySelector(".addPanel.open")) return;
+        var sel = KEYMAP[k.toLowerCase()];
+        if (sel) {
+            var el = document.querySelector(sel);
+            if (el) { e.preventDefault(); el.click(); }
+        }
+    }, true);
+})();
+</script>
+<script id="readingScript">
+/* 阅读设置：字号 / 行距、记住阅读位置、返回顶部按钮 */
+(function () {
+    var out = document.getElementById("output");
+    if (!out) return;
+    var root = document.documentElement, POS_KEY = "readingPos", TOP = 52;   // 52 = 顶部固定工具栏占的高度（和页面 padding-top 一致）
+    var LH = [0, 1.4, 1.6, 1.8, 2.0, 2.4];                                   // 行距选项（0 = 默认）
+
+    /* ---------- 卡片颜色：预设 + 自定义渐变 ---------- */
+    // bg = 卡片背景渐变（上 / 中 / 下三个色），bd = 左侧彩色边框渐变，t1 / t2 = 奇数行 / 偶数行文字色（空 = 自动）
+    var PRESETS = [
+        { id: "default", name: "默认", angle: 180, mid: true, bg: ["#ffffff", "#e9f2ff", "#d3e1ff"], bd: ["#1c84b4", "#01a3a3", "#8a2be2"], t1: "", t2: "" },
+        { id: "mint", name: "薄荷", angle: 180, mid: true, bg: ["#ffffff", "#e6fbf1", "#c7f0dc"], bd: ["#0d9488", "#34d399", "#84cc16"], t1: "", t2: "" },
+        { id: "sakura", name: "樱粉", angle: 180, mid: true, bg: ["#fffafc", "#ffe4ef", "#ffc9de"], bd: ["#ec4899", "#f472b6", "#fb7185"], t1: "", t2: "#be185d" },
+        { id: "peach", name: "暖橙", angle: 180, mid: true, bg: ["#fffdf7", "#ffedd5", "#ffd9a8"], bd: ["#f97316", "#f59e0b", "#ef4444"], t1: "", t2: "#9a3412" },
+        { id: "lavender", name: "淡紫", angle: 180, mid: true, bg: ["#fdfcff", "#ede9fe", "#d8ccff"], bd: ["#7c3aed", "#a78bfa", "#c026d3"], t1: "", t2: "#5b21b6" },
+        { id: "ocean", name: "海洋", angle: 180, mid: true, bg: ["#f4fcff", "#d6f0fc", "#aadcf3"], bd: ["#0ea5e9", "#38bdf8", "#6366f1"], t1: "", t2: "#075985" },
+        { id: "forest", name: "森林", angle: 180, mid: true, bg: ["#f8fff2", "#e2f5cf", "#c3e8a4"], bd: ["#16a34a", "#65a30d", "#ca8a04"], t1: "", t2: "#166534" },
+        { id: "sunset", name: "日落", angle: 135, mid: true, bg: ["#fff8ef", "#ffd9b0", "#ffb3a7"], bd: ["#f97316", "#ef4444", "#db2777"], t1: "", t2: "#9f1239" },
+        { id: "aurora", name: "极光", angle: 160, mid: true, bg: ["#ecfeff", "#d5f7e6", "#d9d2fb"], bd: ["#06b6d4", "#10b981", "#8b5cf6"], t1: "", t2: "#0f766e" },
+        { id: "candy", name: "糖果", angle: 45, mid: true, bg: ["#fff1f6", "#fbe3f5", "#dfe6ff"], bd: ["#f472b6", "#c084fc", "#60a5fa"], t1: "", t2: "#a21caf" },
+        { id: "lemon", name: "柠檬", angle: 90, mid: true, bg: ["#fffef2", "#fdf6b8", "#fde68a"], bd: ["#eab308", "#f59e0b", "#84cc16"], t1: "", t2: "#a16207" },
+        { id: "paper", name: "纸张", angle: 180, mid: true, bg: ["#fffdf8", "#f6efdd", "#e8dcc0"], bd: ["#b08968", "#d4a373", "#a3b18a"], t1: "#3b2f20", t2: "#7c5a2e" },
+        { id: "eye", name: "护眼绿", angle: 180, mid: true, bg: ["#f3faea", "#e3f0d2", "#cfe3b6"], bd: ["#6b9e3a", "#8ab75a", "#c2b04a"], t1: "#2d3b1f", t2: "#4d7c0f" },
+        { id: "night", name: "夜间", angle: 180, mid: true, bg: ["#1e2440", "#161b33", "#0f1428"], bd: ["#38bdf8", "#818cf8", "#c084fc"], t1: "#e5e9ff", t2: "#7ee7c0" },
+        { id: "graphite", name: "石墨", angle: 180, mid: true, bg: ["#2d3240", "#242836", "#1b1e29"], bd: ["#94a3b8", "#64748b", "#38bdf8"], t1: "#eceff4", t2: "#a5f3fc" },
+        { id: "deepsea", name: "深海", angle: 160, mid: true, bg: ["#0d2a47", "#0a1f38", "#071428"], bd: ["#22d3ee", "#3b82f6", "#8b5cf6"], t1: "#dbeafe", t2: "#67e8f9" },
+        { id: "dusk", name: "暮紫", angle: 135, mid: true, bg: ["#34204f", "#261540", "#190c2b"], bd: ["#f472b6", "#a78bfa", "#38bdf8"], t1: "#f3e8ff", t2: "#fbcfe8" },
+        { id: "ember", name: "炭红", angle: 180, mid: true, bg: ["#3a2321", "#2a1816", "#1c0f0e"], bd: ["#fb923c", "#f87171", "#facc15"], t1: "#ffeede", t2: "#fdba74" }
+    ];
+    function hex(v, fb) { return (typeof v === "string" && /^#[0-9a-fA-F]{6}$/.test(v)) ? v.toLowerCase() : fb; }
+    function normalizeCard(raw) {
+        var r = raw && typeof raw === "object" ? raw : {};
+        var id = (r.preset === "custom" || PRESETS.some(function (x) { return x.id === r.preset; })) ? r.preset : "default";
+        var base = PRESETS[0];
+        PRESETS.forEach(function (x) { if (x.id === id) base = x; });
+        if (id !== "custom") return { preset: id, angle: base.angle, mid: base.mid, rev: !!base.rev, bg: base.bg.slice(), bd: base.bd.slice(), t1: base.t1, t2: base.t2 };
+        var d = PRESETS[0], a = Number(r.angle);
+        var bg = Array.isArray(r.bg) ? r.bg : [], bd = Array.isArray(r.bd) ? r.bd : [];
+        return {
+            preset: "custom",
+            angle: isFinite(a) ? Math.min(360, Math.max(0, Math.round(a))) : 180,
+            mid: r.mid !== false,
+            rev: r.rev === true,
+            bg: [hex(bg[0], d.bg[0]), hex(bg[1], d.bg[1]), hex(bg[2], d.bg[2])],
+            bd: [hex(bd[0], d.bd[0]), hex(bd[1], d.bd[1]), hex(bd[2], d.bd[2])],
+            t1: hex(r.t1, ""), t2: hex(r.t2, "")
+        };
+    }
+    function lum(h) {
+        var n = parseInt(h.slice(1), 16);
+        return (0.299 * (n >> 16 & 255) + 0.587 * (n >> 8 & 255) + 0.114 * (n & 255)) / 255;
+    }
+    // 把配置变成具体的外观：背景是深色时自动配上浅色文字、浅色分隔线，保证看得清
+    function cardLook(c) {
+        var st = c.mid ? [c.bg[0], c.bg[1], c.bg[2]] : [c.bg[0], c.bg[2]];
+        var avg = st.reduce(function (a, h) { return a + lum(h); }, 0) / st.length, dark = avg < 0.45;
+        var stops = c.mid ? c.bg[0] + " 0%," + c.bg[1] + " 55%," + c.bg[2] + " 100%" : c.bg[0] + " 0%," + c.bg[2] + " 100%";
+        return {
+            bgImg: "linear-gradient(" + c.angle + "deg," + stops + ")",
+            bdImg: "linear-gradient(" + (c.rev ? "to top" : "to bottom") + "," + c.bd[0] + "," + c.bd[1] + "," + c.bd[2] + ")",
+            dark: dark,
+            t1: c.t1 || (dark ? "#e8ecff" : ""), t2: c.t2 || (dark ? "#86efac" : ""),
+            evenBg: dark ? "rgba(255,255,255,.08)" : "", line: dark ? "rgba(255,255,255,.16)" : ""
+        };
+    }
+    function cardCss(c) {
+        if (c.preset === "default") return "";
+        var k = cardLook(c), sel = "html.readCard #output>div:not(.defaultPromptCard)", css = "";
+        css += sel + "{background:" + k.bgImg + " padding-box," + k.bdImg + " border-box}\n";
+        if (k.t1) css += sel + " p:nth-child(odd){color:" + k.t1 + "}\n";
+        if (k.line) css += sel + " p:not(:last-child){border-bottom-color:" + k.line + "}\n";
+        if (k.evenBg || k.t2) css += sel + " p:nth-child(even){" + (k.evenBg ? "background:" + k.evenBg + ";" : "") + (k.t2 ? "color:" + k.t2 + ";" : "") + "}\n";
+        return css;
+    }
+    var cardStyleEl = null;
+    function applyCard() {
+        var css = cardCss(prefs.card);
+        if (!cardStyleEl) { cardStyleEl = document.createElement("style"); cardStyleEl.id = "readCardDyn"; document.head.appendChild(cardStyleEl); }
+        cardStyleEl.textContent = css;
+        root.classList.toggle("readCard", !!css);
+    }
+
+    /* ---------- 鼠标经过内容时的颜色：预设 + 自定义渐变 ---------- */
+    // c = 渐变颜色（2 色预设时中间色等于第一个色，不启用）；mid = 是否启用中间色；t = 文字色（空 = 按背景明暗自动）
+    var HV = [
+        { n: "蜜桃", a: 135, c: ["#ffe0e6", "#ffe0e6", "#ffc4d6"] },
+        { n: "樱粉", a: 135, c: ["#ffd1e3", "#ffd1e3", "#ff9ec7"] },
+        { n: "暖橙", a: 135, c: ["#ffe8cc", "#ffe8cc", "#ffc58a"] },
+        { n: "柠檬", a: 135, c: ["#fff7b8", "#fff7b8", "#ffe066"] },
+        { n: "薄荷", a: 135, c: ["#d8f9e8", "#d8f9e8", "#8fe8b9"] },
+        { n: "天蓝", a: 135, c: ["#d3ecff", "#d3ecff", "#8fc9ff"] },
+        { n: "淡紫", a: 135, c: ["#e9e0ff", "#e9e0ff", "#c4b0ff"] },
+        { n: "云灰", a: 135, c: ["#eceff4", "#eceff4", "#cfd6e3"] },
+        { n: "冰晶", a: 135, c: ["#f0fbff", "#f0fbff", "#b6e3ff"] },
+        { n: "鎏金", a: 135, c: ["#ffd86b", "#ffd86b", "#ffb300"], t: "#3b2a00" },
+        { n: "日落", a: 135, c: ["#ffb88c", "#ffb88c", "#de6262"], t: "#3b0d0d" },
+        { n: "极光", a: 135, c: ["#43e97b", "#43e97b", "#38f9d7"], t: "#073b2a" },
+        { n: "糖果", a: 135, c: ["#ffb3c6", "#e0b3ff", "#b3d9ff"], mid: true, t: "#3a1d4d" },
+        { n: "彩虹", a: 90, c: ["#ffc4c4", "#fff0a8", "#bfe6ff"], mid: true, t: "#3a2a2a" },
+        { n: "烈焰", a: 135, c: ["#ff9a3c", "#ff9a3c", "#ff3d3d"], t: "#ffffff" },
+        { n: "玫红", a: 135, c: ["#e11d48", "#e11d48", "#fb7185"], t: "#ffffff" },
+        { n: "洋红", a: 135, c: ["#c026d3", "#c026d3", "#f472b6"], t: "#ffffff" },
+        { n: "紫罗兰", a: 135, c: ["#7c3aed", "#7c3aed", "#c084fc"], t: "#ffffff" },
+        { n: "靛蓝", a: 135, c: ["#4f46e5", "#4f46e5", "#818cf8"], t: "#ffffff" },
+        { n: "海洋", a: 135, c: ["#2193b0", "#2193b0", "#6dd5ed"], t: "#ffffff" },
+        { n: "翠绿", a: 135, c: ["#059669", "#059669", "#34d399"], t: "#ffffff" },
+        { n: "深海夜", a: 135, c: ["#1e3a8a", "#1e3a8a", "#0f172a"], t: "#ffffff" },
+        { n: "石墨", a: 135, c: ["#475569", "#475569", "#1e293b"], t: "#ffffff" },
+        { n: "暮紫", a: 135, c: ["#6d28d9", "#6d28d9", "#1e1b4b"], t: "#ffffff" },
+        { n: "炭金", a: 135, c: ["#7a5a0e", "#7a5a0e", "#3a2d12"], t: "#fff3c4" }
+    ];
+    var HV_DEF = { preset: "default", angle: 135, mid: false, colors: ["#d6f8ee", "#d6f8ee", "#b8e4ff"], t: "#0a4a58" };   // 页面原本的 青绿 → 天蓝
+    function normalizeHover(raw) {
+        var r = raw && typeof raw === "object" ? raw : {};
+        var m = /^hv(\d+)$/.exec(String(r.preset || ""));
+        if (m && HV[+m[1]]) {
+            var x = HV[+m[1]];
+            return { preset: "hv" + (+m[1]), angle: x.a, mid: !!x.mid, colors: x.c.slice(), t: x.t || "" };
+        }
+        if (r.preset !== "custom") return { preset: "default", angle: HV_DEF.angle, mid: false, colors: HV_DEF.colors.slice(), t: HV_DEF.t };
+        var a = Number(r.angle), cs = Array.isArray(r.colors) ? r.colors : [];
+        return {
+            preset: "custom",
+            angle: isFinite(a) ? Math.min(360, Math.max(0, Math.round(a))) : 135,
+            mid: r.mid === true,
+            colors: [hex(cs[0], "#d6f8ee"), hex(cs[1], "#e9e0ff"), hex(cs[2], "#b8e4ff")],
+            t: hex(r.t, "")
+        };
+    }
+    function hoverLook(c) {
+        var st = c.mid ? [c.colors[0], c.colors[1], c.colors[2]] : [c.colors[0], c.colors[2]];
+        var avg = st.reduce(function (s, h) { return s + lum(h); }, 0) / st.length, dark = avg < 0.55;
+        return {
+            bg: "linear-gradient(" + c.angle + "deg," + st.join(",") + ")",
+            fg: c.t || (dark ? "#ffffff" : "#1f2a44"),
+            ring: dark ? "rgba(255,255,255,.35)" : "rgba(0,0,0,.14)"
+        };
+    }
+    var hoverStyleEl = null;
+    function applyHover() {
+        var css = "";
+        if (prefs.hover.preset !== "default") {
+            var k = hoverLook(prefs.hover);
+            // 已选中（高亮）/ 批量选中的内容不套用经过颜色，保持原来的选中外观
+            css = "html.readHover #output>div:not(.defaultPromptCard):not(.divHighlight) p:not(.highlight):not(.batchSelected):hover{background:" + k.bg +
+                "!important;color:" + k.fg + "!important;box-shadow:inset 0 0 0 1px " + k.ring + "}\n";
+        }
+        if (!hoverStyleEl) { hoverStyleEl = document.createElement("style"); hoverStyleEl.id = "readHoverDyn"; document.head.appendChild(hoverStyleEl); }
+        hoverStyleEl.textContent = css;
+        root.classList.toggle("readHover", !!css);
+    }
+
+    function normalize(raw) {
+        var r = raw && typeof raw === "object" ? raw : {};
+        var fs = Number(r.fontScale);
+        fs = isFinite(fs) ? Math.min(1.6, Math.max(0.8, fs)) : 1;
+        fs = Math.round(fs * 20) / 20;
+        var lh = Number(r.lineHeight); if (LH.indexOf(lh) === -1) lh = 0;
+        return { fontScale: fs, lineHeight: lh, remember: r.remember !== false, backTop: r.backTop !== false, card: normalizeCard(r.card), hover: normalizeHover(r.hover) };
+    }
+    var prefs = normalize(null);
+
+    /* ---------- 阅读锚点：用“第几个内容块 + 离顶部多远”表示位置，比像素更耐字号 / 窗口变化 ---------- */
+    function kids() { return out.children; }
+    function isPrompt() { return !!out.querySelector(":scope > div.defaultPromptCard"); }
+    function curSig() {
+        var k = kids(); if (!k.length) return "";
+        return k.length + "|" + (k[0].textContent || "").trim().slice(0, 24) + "|" + (k[k.length - 1].textContent || "").trim().slice(0, 24);
+    }
+    function getAnchor() {
+        var k = kids(), lo = 0, hi = k.length - 1, ans = -1;
+        while (lo <= hi) {                       // 二分查找：第一个“底边在工具栏下方”的内容块
+            var mid = (lo + hi) >> 1;
+            if (k[mid].getBoundingClientRect().bottom > TOP + 8) { ans = mid; hi = mid - 1; } else lo = mid + 1;
+        }
+        if (ans < 0) return null;
+        return { idx: ans, delta: Math.round(k[ans].getBoundingClientRect().top - TOP) };
+    }
+    function scrollToAnchor(a) {
+        var k = kids();
+        if (!a || a.idx >= k.length) return false;
+        var y = k[a.idx].getBoundingClientRect().top + window.scrollY - TOP - a.delta;
+        var prev = root.style.scrollBehavior;
+        root.style.scrollBehavior = "auto";      // 恢复位置要“瞬间到位”，不要滚动动画
+        window.scrollTo(0, Math.max(0, y));
+        root.style.scrollBehavior = prev;
+        return true;
+    }
+
+    /* ---------- 应用字号 / 行距 ---------- */
+    function apply() {
+        var changed = String(prefs.fontScale) !== root.style.getPropertyValue("--read-scale") || (prefs.lineHeight > 0 ? String(prefs.lineHeight) : "") !== root.style.getPropertyValue("--read-lh");
+        var a = changed && kids().length && !isPrompt() ? getAnchor() : null;
+        root.classList.toggle("readFs", prefs.fontScale !== 1);
+        root.style.setProperty("--read-scale", String(prefs.fontScale));
+        root.classList.toggle("readLh", prefs.lineHeight > 0);
+        if (prefs.lineHeight > 0) root.style.setProperty("--read-lh", String(prefs.lineHeight)); else root.style.removeProperty("--read-lh");
+        if (changed) {
+            if (a) scrollToAnchor(a);            // 改字号后保持在原来读到的那一段
+            window.dispatchEvent(new Event("resize"));   // 让目录高亮重新计算各标题的位置
+        }
+        if (!prefs.remember) { try { localStorage.removeItem(POS_KEY); } catch (e) { } }
+        applyCard();
+        applyHover();
+        updBack();
+    }
+
+    /* ---------- 记住阅读位置 ---------- */
+    var saveT = 0, userMoved = false, restoredDone = false, notified = false;
+    function savePos() {
+        if (!prefs.remember || (!restoredDone && !userMoved)) return;   // 还没恢复完就不覆盖旧记录
+        if (isPrompt() || !kids().length) return;
+        if (window.scrollY < 80) { try { localStorage.removeItem(POS_KEY); } catch (e) { } return; }   // 回到开头 = 不需要记
+        var a = getAnchor(); if (!a) return;
+        try { localStorage.setItem(POS_KEY, JSON.stringify({ idx: a.idx, delta: a.delta, sig: curSig() })); } catch (e) { }
+    }
+    function saveSoon() { if (!prefs.remember) return; clearTimeout(saveT); saveT = setTimeout(savePos, 350); }
+    ["wheel", "touchstart", "keydown", "mousedown"].forEach(function (ev) {
+        window.addEventListener(ev, function () { userMoved = true; }, { passive: true, capture: true });
+    });
+    function tryRestore(isFinal) {
+        if (restoredDone || userMoved || !prefs.remember) { if (isFinal) restoredDone = true; return; }
+        var raw = null; try { raw = localStorage.getItem(POS_KEY); } catch (e) { }
+        if (!raw) { if (isFinal) restoredDone = true; return; }
+        var pos; try { pos = JSON.parse(raw); } catch (e) { restoredDone = true; return; }
+        if (!kids().length || isPrompt()) { if (isFinal) restoredDone = true; return; }   // 内容还没出来
+        if (!pos || pos.sig !== curSig()) {                                               // 内容已经换了：旧位置作废
+            restoredDone = true; try { localStorage.removeItem(POS_KEY); } catch (e) { } return;
+        }
+        scrollToAnchor(pos);
+        if (!notified) { notified = true; if (typeof showToastGlobal === "function") showToastGlobal("📖 已回到上次阅读的位置"); }
+        if (isFinal) restoredDone = true;
+    }
+    window.addEventListener("load", function () {
+        tryRestore(false);
+        setTimeout(function () { tryRestore(false); }, 300);   // 图片等加载完成后再校准一次
+        setTimeout(function () { tryRestore(true); }, 1200);
+    });
+    window.addEventListener("pagehide", savePos);
+    document.addEventListener("visibilitychange", function () { if (document.hidden) savePos(); });
+
+    /* ---------- 返回顶部按钮 ---------- */
+    var backBtn = document.createElement("button");
+    backBtn.type = "button"; backBtn.className = "backTopBtn"; backBtn.id = "backTopBtn";
+    backBtn.setAttribute("aria-label", "返回顶部"); backBtn.title = "返回顶部";
+    backBtn.innerHTML = "<em>⬆</em>";
+    document.body.appendChild(backBtn);
+    backBtn.addEventListener("click", function () {
+        var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        window.scrollTo({ top: 0, behavior: reduce ? "auto" : "smooth" });
+    });
+    function updBack() { backBtn.classList.toggle("show", prefs.backTop && (window.scrollY || root.scrollTop) > 500); }
+    var raf = 0;
+    window.addEventListener("scroll", function () {
+        if (!raf) raf = requestAnimationFrame(function () { raf = 0; updBack(); });
+        saveSoon();
+    }, { passive: true });
+
+    /* ---------- 设置面板用的接口 ---------- */
+    function sample(box, c) {
+        var el = box.querySelector(".rpSample"); if (!el) return;
+        el.style.fontSize = (17 * c.fontScale) + "px";
+        el.style.lineHeight = c.lineHeight > 0 ? String(c.lineHeight) : "normal";
+    }
+    function buildUI(box) {
+        if (!box) return;
+        function colorIn(cls) { return '<input type="color" class="rcIn ' + cls + '" aria-label="颜色" />'; }
+        var presetChips = PRESETS.map(function (x) {
+            return '<button type="button" class="btCountBtn rcPre" data-id="' + x.id + '"><em class="rcSw" style="background:linear-gradient(' + x.angle + 'deg,' + x.bg[0] + ',' + x.bg[2] + ');border-color:' + x.bd[0] + '"></em>' + x.name + "</button>";
+        }).join("") + '<button type="button" class="btCountBtn rcPre" data-id="custom">自定义</button>';
+        // 3×3 方向键：中间格显示当前角度；角度含义同 CSS（0°=向上，90°=向右，180°=向下）
+        var dirBtns = [[315, "↖", "左上"], [0, "↑", "向上"], [45, "↗", "右上"], [270, "←", "向左"], [-1], [90, "→", "向右"], [225, "↙", "左下"], [180, "↓", "向下"], [135, "↘", "右下"]].map(function (d) {
+            return d[0] < 0 ? '<em class="rcAngVal">180°</em>' : '<button type="button" class="rcDirBtn" data-a="' + d[0] + '" title="' + d[2] + '" aria-label="' + d[2] + '">' + d[1] + "</button>";
+        }).join("");
+        function hvColor(cls) { return '<input type="color" class="hvIn ' + cls + '" aria-label="颜色" />'; }
+        var hvChips = '<button type="button" class="mhChip hvChip" data-id="default" style="background:linear-gradient(135deg,#d6f8ee,#b8e4ff);color:#0a4a58">默认</button>' +
+            HV.map(function (x, i) {
+                var k = hoverLook(normalizeHover({ preset: "hv" + i }));
+                return '<button type="button" class="mhChip hvChip" data-id="hv' + i + '" style="background:' + k.bg + ';color:' + k.fg + '">' + x.n + "</button>";
+            }).join("") + '<button type="button" class="mhChip mhChipCustom hvChip" data-id="custom">🎨 自定义</button>';
+        var hvDirBtns = [[315, "↖", "左上"], [0, "↑", "向上"], [45, "↗", "右上"], [270, "←", "向左"], [-1], [90, "→", "向右"], [225, "↙", "左下"], [180, "↓", "向下"], [135, "↘", "右下"]].map(function (d) {
+            return d[0] < 0 ? '<em class="rcAngVal hvAngVal">135°</em>' : '<button type="button" class="hvDirBtn" data-a="' + d[0] + '" title="' + d[2] + '" aria-label="' + d[2] + '">' + d[1] + "</button>";
+        }).join("");
+        var chips = LH.map(function (v) { return '<button type="button" class="btCountBtn rpLhBtn" data-v="' + v + '">' + (v === 0 ? "默认" : v.toFixed(1)) + "</button>"; }).join("");
+        box.innerHTML =
+            '<div class="hdRowLabel">字号</div>' +
+            '<div class="rpFs"><input type="range" class="rpFsRange" min="80" max="160" step="5" value="100" aria-label="字号" /><em class="rpFsVal">100%</em><button type="button" class="rpMini rpFsReset">重置</button></div>' +
+            '<div class="rpSample">示例：这是一段正文，调整字号和行距后可以在这里预览。第二行文字用来观察行距。<br>The quick brown fox jumps over the lazy dog.</div>' +
+            '<div class="hdRowLabel">行距</div><div class="btCount"><input type="hidden" class="rpLhVal" value="0" />' + chips + "</div>" +
+            '<div class="hdRowLabel">卡片颜色（正文卡片的背景渐变、左侧边框和文字）</div>' +
+            '<div class="btCount rcPresets"><input type="hidden" class="rcPreset" value="default" />' + presetChips + "</div>" +
+            '<div class="rcRow"><em class="rcLab">背景渐变</em>' + colorIn("rcBg0") + colorIn("rcBg1") + colorIn("rcBg2") + '<label class="rcChk"><input type="checkbox" class="rcIn rcMid" /><span>中间色</span></label></div>' +
+            '<div class="rcRow rcDirRow"><em class="rcLab">渐变方向</em><div class="rcDir">' + dirBtns + '</div>' +
+            '<div class="rcDirSide"><input type="range" class="rcIn rcAng" min="0" max="360" step="5" value="180" aria-label="渐变角度" /><div class="rcHint">点箭头选方向（箭头指向颜色渐变的终点），拖动滑块可微调到任意角度</div></div></div>' +
+            '<div class="rcRow"><em class="rcLab">左侧边框</em>' + colorIn("rcBd0") + colorIn("rcBd1") + colorIn("rcBd2") + '<label class="rcChk"><input type="checkbox" class="rcIn rcBdRev" /><span>反向（下→上）</span></label></div>' +
+            '<div class="rcRow"><em class="rcLab">奇数行文字</em>' + colorIn("rcT1") + '<label class="rcChk"><input type="checkbox" class="rcIn rcT1Auto" /><span>自动</span></label>' +
+            '<em class="rcLab rcLab2">偶数行文字</em>' + colorIn("rcT2") + '<label class="rcChk"><input type="checkbox" class="rcIn rcT2Auto" /><span>自动</span></label></div>' +
+            '<div class="rcSample"><div class="rcCard"><p>第一行：卡片里的内容</p><p>第二行（偶数行）</p><p>第三行：鼠标经过、点击会有各自的高亮色</p></div></div>' +
+            '<div class="hdRowLabel">鼠标经过内容时的颜色（经过正文某一行时的背景渐变和文字；已选中的内容保持选中外观）</div>' +
+            '<div class="mhGrid hvGrid"><input type="hidden" class="hvPreset" value="default" />' + hvChips + '</div>' +
+            '<div class="rcRow"><em class="rcLab">背景渐变</em>' + hvColor("hvC0") + hvColor("hvC1") + hvColor("hvC2") + '<label class="rcChk"><input type="checkbox" class="hvIn hvMid" /><span>中间色</span></label></div>' +
+            '<div class="rcRow rcDirRow"><em class="rcLab">渐变方向</em><div class="rcDir">' + hvDirBtns + '</div>' +
+            '<div class="rcDirSide"><input type="range" class="hvIn hvAng" min="0" max="360" step="5" value="135" aria-label="渐变角度" /><div class="rcHint">点箭头选方向，拖动滑块可微调到任意角度</div></div></div>' +
+            '<div class="rcRow"><em class="rcLab">文字颜色</em>' + hvColor("hvT") + '<label class="rcChk"><input type="checkbox" class="hvIn hvTAuto" /><span>自动</span></label></div>' +
+            '<div class="rcSample"><div class="hvCard"><p>第一行：普通状态</p><p class="hvDemo">第二行：鼠标经过时的样子</p><p>第三行：普通状态</p></div></div>' +
+            '<div class="panelBtnRow"><button type="button" class="panelBtn secondaryBtn hvReset">恢复默认经过色</button></div>' +
+            '<label class="fxItem"><input type="checkbox" class="rpRemember" /><span>记住阅读位置（刷新或下次打开时回到上次读到的地方）</span></label>' +
+            '<label class="fxItem"><input type="checkbox" class="rpBackTop" /><span>页面往下滚动时，显示「返回顶部」按钮</span></label>';
+        // 手动改了任何一个颜色 / 方向，就算“自定义”
+        box.addEventListener("input", function (e) {
+            var t = e.target;
+            if (t.classList && t.classList.contains("hvIn")) {      // 经过色：手动改了颜色 / 方向 / 文字色，就算“自定义”
+                if (t.classList.contains("hvT")) q(box, "hvTAuto").checked = false;
+                q(box, "hvPreset").value = "custom";
+                mark(box);
+                return;
+            }
+            if (!t.classList || !t.classList.contains("rcIn")) return;
+            if (t.classList.contains("rcT1")) box.querySelector(".rcT1Auto").checked = false;
+            if (t.classList.contains("rcT2")) box.querySelector(".rcT2Auto").checked = false;
+            box.querySelector(".rcPreset").value = "custom";
+            mark(box);
+        });
+        box.onclick = function (e) {
+            if (!e.target.closest) return;
+            var hdir = e.target.closest(".hvDirBtn");
+            if (hdir && box.contains(hdir)) {
+                var hs = q(box, "hvAng");
+                hs.value = hdir.getAttribute("data-a");
+                hs.dispatchEvent(new Event("input", { bubbles: true }));
+                return;
+            }
+            var hchip = e.target.closest(".hvChip");
+            if (hchip && box.contains(hchip)) {
+                var hid = hchip.getAttribute("data-id"), hp = q(box, "hvPreset");
+                if (hid !== "custom") hvFill(box, normalizeHover({ preset: hid }));
+                if (hp.value !== hid) { hp.value = hid; mark(box); hp.dispatchEvent(new Event("change", { bubbles: true })); }
+                return;
+            }
+            if (e.target.closest(".hvReset")) {
+                var hp2 = q(box, "hvPreset");
+                hvFill(box, normalizeHover({ preset: "default" }));
+                hp2.value = "default"; mark(box); hp2.dispatchEvent(new Event("change", { bubbles: true }));
+                return;
+            }
+            var dir = e.target.closest(".rcDirBtn");
+            if (dir && box.contains(dir)) {                  // 点方向键：设置角度，等同于拖动滑块
+                var sl = q(box, "rcAng");
+                sl.value = dir.getAttribute("data-a");
+                sl.dispatchEvent(new Event("input", { bubbles: true }));
+                return;
+            }
+            var pre = e.target.closest(".rcPre");
+            if (pre && box.contains(pre)) {
+                var id = pre.getAttribute("data-id"), hid = box.querySelector(".rcPreset");
+                if (id !== "custom") fillCard(box, normalizeCard({ preset: id }));
+                if (hid.value !== id) { hid.value = id; mark(box); hid.dispatchEvent(new Event("change", { bubbles: true })); }
+                return;
+            }
+            var b = e.target.closest(".rpLhBtn");
+            if (b && box.contains(b)) {
+                var inp = box.querySelector(".rpLhVal");
+                if (inp.value !== b.getAttribute("data-v")) { inp.value = b.getAttribute("data-v"); mark(box); inp.dispatchEvent(new Event("change", { bubbles: true })); }
+                return;
+            }
+            if (e.target.closest(".rpFsReset")) {
+                var r = box.querySelector(".rpFsRange");
+                if (r.value !== "100") { r.value = "100"; r.dispatchEvent(new Event("input", { bubbles: true })); }
+            }
+        };
+    }
+    function q(box, cls) { return box.querySelector("." + cls); }
+    // 把一份卡片配置填进各个输入控件
+    function fillCard(box, c) {
+        for (var i = 0; i < 3; i++) { q(box, "rcBg" + i).value = c.bg[i]; q(box, "rcBd" + i).value = c.bd[i]; }
+        q(box, "rcMid").checked = c.mid; q(box, "rcAng").value = c.angle; q(box, "rcBdRev").checked = !!c.rev;
+        q(box, "rcT1").value = c.t1 || "#111111"; q(box, "rcT1Auto").checked = !c.t1;
+        q(box, "rcT2").value = c.t2 || "#2b8a00"; q(box, "rcT2Auto").checked = !c.t2;
+    }
+    function hvFill(box, c) {
+        for (var i = 0; i < 3; i++) q(box, "hvC" + i).value = c.colors[i];
+        q(box, "hvMid").checked = c.mid; q(box, "hvAng").value = c.angle;
+        q(box, "hvT").value = c.t || "#1f2a44"; q(box, "hvTAuto").checked = !c.t;
+    }
+    function hvFromUI(box) {
+        return normalizeHover({
+            preset: q(box, "hvPreset").value, angle: Number(q(box, "hvAng").value), mid: q(box, "hvMid").checked,
+            colors: [q(box, "hvC0").value, q(box, "hvC1").value, q(box, "hvC2").value],
+            t: q(box, "hvTAuto").checked ? "" : q(box, "hvT").value
+        });
+    }
+    function hvMark(box) {
+        q(box, "hvC1").disabled = !q(box, "hvMid").checked;
+        q(box, "hvT").disabled = q(box, "hvTAuto").checked;
+        var ang = Number(q(box, "hvAng").value);
+        q(box, "hvAngVal").textContent = ang + "°";
+        Array.prototype.forEach.call(box.querySelectorAll(".hvDirBtn"), function (b) { b.classList.toggle("on", Number(b.getAttribute("data-a")) === ang % 360); });
+        var pid = q(box, "hvPreset").value;
+        Array.prototype.forEach.call(box.querySelectorAll(".hvChip"), function (b) { b.classList.toggle("on", b.getAttribute("data-id") === pid); });
+        var c = hvFromUI(box), k = hoverLook(c), demo = box.querySelector(".hvDemo");
+        if (demo) { demo.style.background = k.bg; demo.style.color = k.fg; demo.style.boxShadow = "inset 0 0 0 1px " + k.ring; }
+    }
+    function cardFromUI(box) {
+        return normalizeCard({
+            preset: q(box, "rcPreset").value, angle: Number(q(box, "rcAng").value), mid: q(box, "rcMid").checked, rev: q(box, "rcBdRev").checked,
+            bg: [q(box, "rcBg0").value, q(box, "rcBg1").value, q(box, "rcBg2").value], bd: [q(box, "rcBd0").value, q(box, "rcBd1").value, q(box, "rcBd2").value],
+            t1: q(box, "rcT1Auto").checked ? "" : q(box, "rcT1").value, t2: q(box, "rcT2Auto").checked ? "" : q(box, "rcT2").value
+        });
+    }
+    function sampleCard(box, c) {
+        var el = box.querySelector(".rcCard"); if (!el) return;
+        var look = c.preset === "default" ? null : cardLook(c), ps = el.querySelectorAll("p");
+        el.style.background = (look ? look.bgImg : cardLook(PRESETS[0]).bgImg) + " padding-box," + (look ? look.bdImg : cardLook(PRESETS[0]).bdImg) + " border-box";
+        for (var i = 0; i < ps.length; i++) {
+            var even = i % 2 === 1;
+            ps[i].style.color = look ? (even ? look.t2 : look.t1) : (even ? "#2b8a00" : "");
+            ps[i].style.background = look ? (even ? look.evenBg : "") : (even ? "rgba(255,255,255,.38)" : "");
+            ps[i].style.borderBottomColor = look && look.line ? look.line : "";
+        }
+    }
+    function mark(box) {
+        q(box, "rcBg1").disabled = !q(box, "rcMid").checked;
+        q(box, "rcT1").disabled = q(box, "rcT1Auto").checked; q(box, "rcT2").disabled = q(box, "rcT2Auto").checked;
+        var ang = Number(q(box, "rcAng").value);
+        q(box, "rcAngVal").textContent = ang + "°";
+        Array.prototype.forEach.call(box.querySelectorAll(".rcDirBtn"), function (b) { b.classList.toggle("on", Number(b.getAttribute("data-a")) === ang % 360); });
+        var pid = q(box, "rcPreset").value;
+        Array.prototype.forEach.call(box.querySelectorAll(".rcPre"), function (b) { b.classList.toggle("on", b.getAttribute("data-id") === pid); });
+        sampleCard(box, cardFromUI(box));
+        hvMark(box);
+        var v = Number(box.querySelector(".rpLhVal").value) || 0;
+        Array.prototype.forEach.call(box.querySelectorAll(".rpLhBtn"), function (b) { b.classList.toggle("on", Number(b.getAttribute("data-v")) === v); });
+        box.querySelector(".rpFsVal").textContent = box.querySelector(".rpFsRange").value + "%";
+    }
+    function syncUI(box, c) {
+        if (!box) return;
+        c = normalize(c);
+        box.querySelector(".rpFsRange").value = Math.round(c.fontScale * 100);
+        box.querySelector(".rpLhVal").value = c.lineHeight;
+        box.querySelector(".rpRemember").checked = c.remember;
+        box.querySelector(".rpBackTop").checked = c.backTop;
+        fillCard(box, c.card); q(box, "rcPreset").value = c.card.preset;
+        hvFill(box, c.hover); q(box, "hvPreset").value = c.hover.preset;
+        mark(box); sample(box, c);
+    }
+    function readUI(box) {
+        var c = normalize({
+            fontScale: Number(box.querySelector(".rpFsRange").value) / 100,
+            lineHeight: Number(box.querySelector(".rpLhVal").value),
+            remember: box.querySelector(".rpRemember").checked,
+            backTop: box.querySelector(".rpBackTop").checked,
+            card: cardFromUI(box),
+            hover: hvFromUI(box)
+        });
+        mark(box); sample(box, c);
+        return c;
+    }
+    window.ReadingPrefs = {
+        normalize: normalize, buildUI: buildUI, syncUI: syncUI, readUI: readUI,
+        set: function (c) { prefs = normalize(c); apply(); }
+    };
+    updBack();
+})();
+</script>
+<script id="storeInfoScript">
+/* 设置 → 备份 → 存储空间：显示存储方式、用量，并可申请“持久存储” */
+(function () {
+    var box = document.getElementById("storeInfo"), btn = document.getElementById("storePersistBtn");
+    if (!box || !window.Store) return;
+    function fmt(n) {
+        if (n === undefined || n === null || isNaN(n)) return "未知";
+        if (n >= 1073741824) return (n / 1073741824).toFixed(1) + " GB";
+        if (n >= 1048576) return (n / 1048576).toFixed(1) + " MB";
+        if (n >= 1024) return Math.round(n / 1024) + " KB";
+        return n + " B";
+    }
+    function render() {
+        Store.info().then(function (o) {
+            var idb = o.mode === "idb", h = "";
+            h += "存储方式：" + (idb ? "<b>IndexedDB</b>（容量大）" : '<b class="stWarn">localStorage</b>（约 5MB；当前浏览器不支持或禁用了 IndexedDB）') + "<br>";
+            h += "本页内容约 <b>" + fmt(o.total) + "</b>（内容 " + fmt(o.sizes.lastOpenedFile + o.sizes.manualAdditions) + "，背景 " + fmt(o.sizes.customBackground) + "）<br>";
+            if (o.quota) {
+                var pct = o.usage / o.quota * 100;
+                h += "浏览器已用 <b>" + fmt(o.usage) + "</b> / 可用约 <b>" + fmt(o.quota) + "</b>（" + (pct < 0.1 ? "<0.1" : pct.toFixed(1)) + "%）";
+                h += '<div class="stBar"><i style="width:' + Math.max(0.5, Math.min(100, pct)) + '%"></i></div>';
+            } else if (!idb) {
+                h += "localStorage 上限约 5MB，内容大了会提示保存失败。";
+            }
+            if (o.persisted !== undefined) h += "持久存储：" + (o.persisted ? "<b>已开启 ✅</b>" : "未开启（浏览器空间紧张时，可能被自动清理）");
+            box.innerHTML = h;
+            btn.style.display = (o.persisted === false && idb) ? "" : "none";
+        });
+    }
+    document.addEventListener("click", function (e) {
+        var t = e.target.closest ? e.target.closest('.setTabBtn[data-stab="backup"]') : null;
+        if (t) render();
+    });
+    btn.addEventListener("click", function () {
+        Store.persist().then(function (ok) {
+            if (typeof showToastGlobal === "function") showToastGlobal(ok ? "已开启持久存储 ✅" : "浏览器没有批准（可能需要先收藏本页或安装为应用）");
+            render();
+        });
+    });
+    // 如果这次打开时刚把旧数据迁移到了 IndexedDB，提示一下
+    $(function () { if (Store.migrated() && typeof showToastGlobal === "function") showToastGlobal("✅ 内容存储已升级为 IndexedDB（容量更大）"); });
 })();
 </script>
 </body>
